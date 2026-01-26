@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/atdrendel/ankigo/internal/ankiconnect"
@@ -11,11 +12,16 @@ import (
 
 // mockClient is a test double for ankiconnect.Client
 type mockClient struct {
-	decks     []string
-	deckIDs   map[string]int64
-	deckStats map[int64]ankiconnect.DeckStats
-	err       error
-	statsErr  error
+	decks          []string
+	deckIDs        map[string]int64
+	deckStats      map[int64]ankiconnect.DeckStats
+	err            error
+	statsErr       error
+	createDeckID   int64
+	createDeckErr  error
+	createdDeck    string // captures name passed to CreateDeck
+	deleteDecksErr error
+	deletedDecks   []string // captures names passed to DeleteDecks
 }
 
 func (m *mockClient) DeckNames() ([]string, error) {
@@ -28,6 +34,16 @@ func (m *mockClient) DeckNamesAndIds() (map[string]int64, error) {
 
 func (m *mockClient) GetDeckStats(decks []string) (map[int64]ankiconnect.DeckStats, error) {
 	return m.deckStats, m.statsErr
+}
+
+func (m *mockClient) CreateDeck(name string) (int64, error) {
+	m.createdDeck = name
+	return m.createDeckID, m.createDeckErr
+}
+
+func (m *mockClient) DeleteDecks(decks []string) error {
+	m.deletedDecks = decks
+	return m.deleteDecksErr
 }
 
 func TestDeckList_PlainText_Default(t *testing.T) {
@@ -536,5 +552,543 @@ func TestDeckList_JSON_StatsMissing(t *testing.T) {
 	// Should have zero for missing stats
 	if result[0]["new"].(float64) != 0 {
 		t.Errorf("expected new=0, got %v", result[0]["new"])
+	}
+}
+
+func TestDeckCreate_Success(t *testing.T) {
+	mock := &mockClient{
+		createDeckID: 1234567890,
+	}
+
+	var buf bytes.Buffer
+	err := runDeckCreate(mock, &buf, "Test Deck")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.createdDeck != "Test Deck" {
+		t.Errorf("expected createdDeck 'Test Deck', got %q", mock.createdDeck)
+	}
+	expected := "1234567890\n"
+	if buf.String() != expected {
+		t.Errorf("expected output %q, got %q", expected, buf.String())
+	}
+}
+
+func TestDeckCreate_ConnectionError(t *testing.T) {
+	mock := &mockClient{
+		createDeckErr: errors.New("connection refused"),
+	}
+
+	var buf bytes.Buffer
+	err := runDeckCreate(mock, &buf, "Test Deck")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "failed to create deck: connection refused" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestDeckCreate_APIError(t *testing.T) {
+	mock := &mockClient{
+		createDeckErr: errors.New("collection is not available"),
+	}
+
+	var buf bytes.Buffer
+	err := runDeckCreate(mock, &buf, "Test Deck")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "failed to create deck: collection is not available" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestDeckCreate_ExistingDeck(t *testing.T) {
+	// Creating an existing deck returns its ID (not an error)
+	mock := &mockClient{
+		createDeckID: 1,
+	}
+
+	var buf bytes.Buffer
+	err := runDeckCreate(mock, &buf, "Default")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := "1\n"
+	if buf.String() != expected {
+		t.Errorf("expected output %q, got %q", expected, buf.String())
+	}
+}
+
+func TestDeckCreate_HierarchicalDeck(t *testing.T) {
+	mock := &mockClient{
+		createDeckID: 9876543210,
+	}
+
+	var buf bytes.Buffer
+	err := runDeckCreate(mock, &buf, "Japanese::JLPT N3::Vocabulary")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.createdDeck != "Japanese::JLPT N3::Vocabulary" {
+		t.Errorf("expected createdDeck 'Japanese::JLPT N3::Vocabulary', got %q", mock.createdDeck)
+	}
+	expected := "9876543210\n"
+	if buf.String() != expected {
+		t.Errorf("expected output %q, got %q", expected, buf.String())
+	}
+}
+
+func TestDeckCreate_EmptyName(t *testing.T) {
+	mock := &mockClient{}
+
+	var buf bytes.Buffer
+	err := runDeckCreate(mock, &buf, "")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "deck name cannot be empty" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestDeckCreate_WhitespaceOnlyName(t *testing.T) {
+	mock := &mockClient{}
+
+	var buf bytes.Buffer
+	err := runDeckCreate(mock, &buf, "   ")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "deck name cannot be empty" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestDeckDelete_Success_SingleDeck(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Test Deck"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Test Deck"}, true, false, false)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.deletedDecks) != 1 || mock.deletedDecks[0] != "Test Deck" {
+		t.Errorf("expected deletedDecks ['Test Deck'], got %v", mock.deletedDecks)
+	}
+	if stdout.String() != "" {
+		t.Errorf("expected no stdout, got %q", stdout.String())
+	}
+	if stderr.String() != "Deleted Test Deck\n" {
+		t.Errorf("expected stderr 'Deleted Test Deck\\n', got %q", stderr.String())
+	}
+}
+
+func TestDeckDelete_Success_MultipleDecks(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Deck1", "Deck2", "Deck3"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Deck1", "Deck2", "Deck3"}, true, false, false)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.deletedDecks) != 3 {
+		t.Errorf("expected 3 deletedDecks, got %d", len(mock.deletedDecks))
+	}
+	if mock.deletedDecks[0] != "Deck1" || mock.deletedDecks[1] != "Deck2" || mock.deletedDecks[2] != "Deck3" {
+		t.Errorf("expected deletedDecks ['Deck1', 'Deck2', 'Deck3'], got %v", mock.deletedDecks)
+	}
+	expectedStderr := "Deleted Deck1\nDeleted Deck2\nDeleted Deck3\n"
+	if stderr.String() != expectedStderr {
+		t.Errorf("expected stderr %q, got %q", expectedStderr, stderr.String())
+	}
+}
+
+func TestDeckDelete_APIError(t *testing.T) {
+	mock := &mockClient{
+		decks:          []string{"Test Deck"},
+		deleteDecksErr: errors.New("collection is not available"),
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Test Deck"}, true, false, false)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "failed to delete decks: collection is not available" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestDeckDelete_NoDeckNames(t *testing.T) {
+	mock := &mockClient{}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{}, true, false, false)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "at least one deck name is required" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestDeckDelete_DryRun(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Deck1", "Deck2"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Deck1", "Deck2"}, true, true, false)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should NOT call the API
+	if mock.deletedDecks != nil {
+		t.Errorf("expected no API call, but deletedDecks was set to %v", mock.deletedDecks)
+	}
+	// Should output deck names to stdout
+	if stdout.String() != "Deck1\nDeck2\n" {
+		t.Errorf("expected stdout 'Deck1\\nDeck2\\n', got %q", stdout.String())
+	}
+	// Should show info message on stderr
+	if stderr.String() != "Would delete the following decks (and all their cards):\n" {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+func TestDeckDelete_ConfirmationYes(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Test Deck"},
+	}
+
+	stdin := bytes.NewBufferString("y\n")
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should call the API
+	if len(mock.deletedDecks) != 1 || mock.deletedDecks[0] != "Test Deck" {
+		t.Errorf("expected deletedDecks ['Test Deck'], got %v", mock.deletedDecks)
+	}
+	// Should show prompt on stderr
+	if !bytes.Contains(stderr.Bytes(), []byte("will be deleted")) {
+		t.Errorf("expected warning on stderr, got %q", stderr.String())
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("Continue?")) {
+		t.Errorf("expected confirmation prompt on stderr, got %q", stderr.String())
+	}
+	// Should show confirmation of deletion
+	if !bytes.Contains(stderr.Bytes(), []byte("Deleted Test Deck")) {
+		t.Errorf("expected deletion confirmation on stderr, got %q", stderr.String())
+	}
+}
+
+func TestDeckDelete_ConfirmationYesFull(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Test Deck"},
+	}
+
+	stdin := bytes.NewBufferString("yes\n")
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should call the API
+	if len(mock.deletedDecks) != 1 || mock.deletedDecks[0] != "Test Deck" {
+		t.Errorf("expected deletedDecks ['Test Deck'], got %v", mock.deletedDecks)
+	}
+	// Should show confirmation of deletion
+	if !bytes.Contains(stderr.Bytes(), []byte("Deleted Test Deck")) {
+		t.Errorf("expected deletion confirmation on stderr, got %q", stderr.String())
+	}
+}
+
+func TestDeckDelete_ConfirmationNo(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Test Deck"},
+	}
+
+	stdin := bytes.NewBufferString("n\n")
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrCancelled) {
+		t.Errorf("expected ErrCancelled, got: %v", err)
+	}
+	// Should NOT call the API
+	if mock.deletedDecks != nil {
+		t.Errorf("expected no API call, but deletedDecks was set to %v", mock.deletedDecks)
+	}
+}
+
+func TestDeckDelete_ConfirmationOther(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Test Deck"},
+	}
+
+	stdin := bytes.NewBufferString("maybe\n")
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrCancelled) {
+		t.Errorf("expected ErrCancelled, got: %v", err)
+	}
+	// Should NOT call the API
+	if mock.deletedDecks != nil {
+		t.Errorf("expected no API call, but deletedDecks was set to %v", mock.deletedDecks)
+	}
+}
+
+func TestDeckDelete_HierarchicalDeck(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Japanese::JLPT N3::Vocabulary"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Japanese::JLPT N3::Vocabulary"}, true, false, false)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.deletedDecks) != 1 || mock.deletedDecks[0] != "Japanese::JLPT N3::Vocabulary" {
+		t.Errorf("expected deletedDecks ['Japanese::JLPT N3::Vocabulary'], got %v", mock.deletedDecks)
+	}
+	if stderr.String() != "Deleted Japanese::JLPT N3::Vocabulary\n" {
+		t.Errorf("expected stderr 'Deleted Japanese::JLPT N3::Vocabulary\\n', got %q", stderr.String())
+	}
+}
+
+func TestDeckDelete_ByID_Success(t *testing.T) {
+	mock := &mockClient{
+		deckIDs: map[string]int64{
+			"Default":   1,
+			"Test Deck": 1234567890,
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"1234567890"}, true, false, true)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.deletedDecks) != 1 || mock.deletedDecks[0] != "Test Deck" {
+		t.Errorf("expected deletedDecks ['Test Deck'], got %v", mock.deletedDecks)
+	}
+	if stdout.String() != "" {
+		t.Errorf("expected no stdout, got %q", stdout.String())
+	}
+	if stderr.String() != "Deleted Test Deck\n" {
+		t.Errorf("expected stderr 'Deleted Test Deck\\n', got %q", stderr.String())
+	}
+}
+
+func TestDeckDelete_ByID_MultipleIDs(t *testing.T) {
+	mock := &mockClient{
+		deckIDs: map[string]int64{
+			"Deck A": 111,
+			"Deck B": 222,
+			"Deck C": 333,
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"111", "333"}, true, false, true)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.deletedDecks) != 2 {
+		t.Errorf("expected 2 deletedDecks, got %d", len(mock.deletedDecks))
+	}
+	// Order should match input order
+	if mock.deletedDecks[0] != "Deck A" || mock.deletedDecks[1] != "Deck C" {
+		t.Errorf("expected deletedDecks ['Deck A', 'Deck C'], got %v", mock.deletedDecks)
+	}
+	expectedStderr := "Deleted Deck A\nDeleted Deck C\n"
+	if stderr.String() != expectedStderr {
+		t.Errorf("expected stderr %q, got %q", expectedStderr, stderr.String())
+	}
+}
+
+func TestDeckDelete_ByID_NotFound(t *testing.T) {
+	mock := &mockClient{
+		deckIDs: map[string]int64{
+			"Default": 1,
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"999999999"}, true, false, true)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "deck with ID 999999999 not found" {
+		t.Errorf("unexpected error message: %v", err)
+	}
+	// Should NOT call the API
+	if mock.deletedDecks != nil {
+		t.Errorf("expected no API call, but deletedDecks was set to %v", mock.deletedDecks)
+	}
+}
+
+func TestDeckDelete_ByID_InvalidID(t *testing.T) {
+	mock := &mockClient{
+		deckIDs: map[string]int64{
+			"Default": 1,
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"not-a-number"}, true, false, true)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != `invalid deck ID "not-a-number": must be a number` {
+		t.Errorf("unexpected error message: %v", err)
+	}
+	// Should NOT call the API
+	if mock.deletedDecks != nil {
+		t.Errorf("expected no API call, but deletedDecks was set to %v", mock.deletedDecks)
+	}
+}
+
+func TestDeckDelete_ByID_DryRun(t *testing.T) {
+	mock := &mockClient{
+		deckIDs: map[string]int64{
+			"Default":   1,
+			"Test Deck": 1234567890,
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"1234567890", "1"}, true, true, true)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should NOT call the API
+	if mock.deletedDecks != nil {
+		t.Errorf("expected no API call, but deletedDecks was set to %v", mock.deletedDecks)
+	}
+	// Should output resolved deck names to stdout (in input order)
+	if stdout.String() != "Test Deck\nDefault\n" {
+		t.Errorf("expected stdout 'Test Deck\\nDefault\\n', got %q", stdout.String())
+	}
+	// Should show info message on stderr
+	if stderr.String() != "Would delete the following decks (and all their cards):\n" {
+		t.Errorf("unexpected stderr: %q", stderr.String())
+	}
+}
+
+func TestDeckDelete_NonExistentDeck(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Default", "Existing"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Missing"}, true, false, false)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	// Should return ErrSilent (error already reported via stderr)
+	if !errors.Is(err, ErrSilent) {
+		t.Errorf("expected ErrSilent, got: %v", err)
+	}
+	// Should print "Could not find" message to stderr
+	if !strings.Contains(stderr.String(), "Could not find Missing") {
+		t.Errorf("expected 'Could not find Missing' on stderr, got: %q", stderr.String())
+	}
+	// Should NOT call DeleteDecks
+	if mock.deletedDecks != nil {
+		t.Errorf("expected no DeleteDecks call, but got: %v", mock.deletedDecks)
+	}
+}
+
+func TestDeckDelete_MixedExistentAndNonExistent(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Default", "Existing"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Existing", "Missing"}, true, false, false)
+
+	if err == nil {
+		t.Fatal("expected error for partial failure, got nil")
+	}
+	// Should return ErrSilent (error already reported via stderr)
+	if !errors.Is(err, ErrSilent) {
+		t.Errorf("expected ErrSilent, got: %v", err)
+	}
+	// Should delete existing deck
+	if len(mock.deletedDecks) != 1 || mock.deletedDecks[0] != "Existing" {
+		t.Errorf("expected deletedDecks ['Existing'], got %v", mock.deletedDecks)
+	}
+	// Should print "Deleted Existing" to stderr
+	if !strings.Contains(stderr.String(), "Deleted Existing") {
+		t.Errorf("expected 'Deleted Existing' on stderr, got: %q", stderr.String())
+	}
+	// Should print "Could not find Missing" to stderr
+	if !strings.Contains(stderr.String(), "Could not find Missing") {
+		t.Errorf("expected 'Could not find Missing' on stderr, got: %q", stderr.String())
+	}
+}
+
+func TestDeckDelete_AllNonExistent(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Default"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"A", "B"}, true, false, false)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	// Should return ErrSilent (error already reported via stderr)
+	if !errors.Is(err, ErrSilent) {
+		t.Errorf("expected ErrSilent, got: %v", err)
+	}
+	// Should print "Could not find" for both decks
+	if !strings.Contains(stderr.String(), "Could not find A") {
+		t.Errorf("expected 'Could not find A' on stderr, got: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Could not find B") {
+		t.Errorf("expected 'Could not find B' on stderr, got: %q", stderr.String())
+	}
+	// Should NOT call DeleteDecks
+	if mock.deletedDecks != nil {
+		t.Errorf("expected no DeleteDecks call, but got: %v", mock.deletedDecks)
 	}
 }

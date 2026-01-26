@@ -23,6 +23,8 @@ type Client interface {
 	DeckNames() ([]string, error)
 	DeckNamesAndIds() (map[string]int64, error)
 	GetDeckStats(decks []string) (map[int64]DeckStats, error)
+	CreateDeck(name string) (int64, error)
+	DeleteDecks(decks []string) error
 }
 
 // HTTPClient is the real implementation that communicates with anki-connect.
@@ -172,4 +174,72 @@ func (c *HTTPClient) GetDeckStats(decks []string) (map[int64]DeckStats, error) {
 	}
 
 	return result, nil
+}
+
+// CreateDeck creates a new deck with the given name and returns its ID.
+// If the deck already exists, it returns the existing deck's ID.
+func (c *HTTPClient) CreateDeck(name string) (int64, error) {
+	req := request{
+		Action:  "createDeck",
+		Version: 6,
+		Params:  map[string]interface{}{"deck": name},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return 0, err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return 0, err
+	}
+
+	if apiResp.Error != nil {
+		return 0, errors.New(*apiResp.Error)
+	}
+
+	var deckID int64
+	if err := json.Unmarshal(apiResp.Result, &deckID); err != nil {
+		return 0, err
+	}
+
+	return deckID, nil
+}
+
+// DeleteDecks deletes the specified decks and all their cards.
+func (c *HTTPClient) DeleteDecks(decks []string) error {
+	req := request{
+		Action:  "deleteDecks",
+		Version: 6,
+		Params:  map[string]interface{}{"decks": decks, "cardsToo": true},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return err
+	}
+
+	if apiResp.Error != nil {
+		return errors.New(*apiResp.Error)
+	}
+
+	return nil
 }

@@ -91,6 +91,43 @@ ankigo: error: failed to connect to Anki: connection refused
 - Include: what failed, why, and how to fix (when possible)
 - Exit with non-zero code
 
+### Avoid Redundant Error Messages
+
+When a command prints specific error messages (e.g., "Could not find X"), don't also return a generic error that gets printed by `main.go`. This creates noisy, redundant output:
+
+```
+# BAD: Redundant error message
+Could not find deck-a
+Could not find deck-b
+Error: some decks were not found   ← Redundant! The user already knows.
+```
+
+```
+# GOOD: Specific messages only, exit code signals failure
+Could not find deck-a
+Could not find deck-b
+$ echo $?
+1
+```
+
+Use `ErrSilent` when the command has already printed appropriate error messages:
+
+```go
+// cmd/errors.go defines sentinel errors:
+// - ErrCancelled: user cancelled (e.g., answered "no" to confirmation)
+// - ErrSilent: command failed but already printed specific error messages
+
+// In your command:
+for _, missing := range notFound {
+    fmt.Fprintf(stderr, "Could not find %s\n", missing)
+}
+if len(notFound) > 0 {
+    return ErrSilent  // Exit non-zero, but don't print another error
+}
+```
+
+Before adding new error handling, check `cmd/errors.go` for existing patterns.
+
 ### Exit Codes
 
 | Code | Meaning |
@@ -248,3 +285,4 @@ ankigo/
 - [ ] Works in pipes (non-TTY mode)
 - [ ] Has unit tests with mock client
 - [ ] Destructive actions require confirmation (unless `--force`)
+- [ ] **Simulate the full user experience**: mentally run the command and read the complete output — check for redundant messages, unclear feedback, or missing information

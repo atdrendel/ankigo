@@ -16,6 +16,7 @@ var rootCmd = &cobra.Command{
 
 It communicates with Anki through the anki-connect plugin, allowing you to
 create decks, add cards, search your collection, and more—all from the terminal.`,
+	SilenceErrors: true,
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

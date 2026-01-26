@@ -274,3 +274,163 @@ func TestClient_GetDeckStats_Empty(t *testing.T) {
 		t.Errorf("expected 0 stats, got %d", len(stats))
 	}
 }
+
+func TestClient_CreateDeck_Success(t *testing.T) {
+	// Setup: mock server returns deck ID
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST request, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": 1234567890, "error": null}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	deckID, err := client.CreateDeck("Test Deck")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deckID != 1234567890 {
+		t.Errorf("expected deck ID 1234567890, got %d", deckID)
+	}
+}
+
+func TestClient_CreateDeck_APIError(t *testing.T) {
+	// Setup: mock server returns API error
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": null, "error": "collection is not available"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	deckID, err := client.CreateDeck("Test Deck")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if deckID != 0 {
+		t.Errorf("expected deck ID 0, got %d", deckID)
+	}
+	if err.Error() != "collection is not available" {
+		t.Errorf("expected error message 'collection is not available', got %q", err.Error())
+	}
+}
+
+func TestClient_CreateDeck_ConnectionError(t *testing.T) {
+	// Setup: client with invalid URL (no server running)
+	client := NewClient("http://localhost:59999")
+	deckID, err := client.CreateDeck("Test Deck")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if deckID != 0 {
+		t.Errorf("expected deck ID 0, got %d", deckID)
+	}
+}
+
+func TestClient_CreateDeck_InvalidJSON(t *testing.T) {
+	// Setup: mock server returns invalid JSON
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`not valid json`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	deckID, err := client.CreateDeck("Test Deck")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if deckID != 0 {
+		t.Errorf("expected deck ID 0, got %d", deckID)
+	}
+}
+
+func TestClient_CreateDeck_ExistingDeck(t *testing.T) {
+	// Setup: mock server returns existing deck's ID (not an error)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// anki-connect returns the existing deck ID when creating an existing deck
+		w.Write([]byte(`{"result": 1, "error": null}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	deckID, err := client.CreateDeck("Default")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deckID != 1 {
+		t.Errorf("expected deck ID 1, got %d", deckID)
+	}
+}
+
+func TestClient_DeleteDecks_Success(t *testing.T) {
+	// Setup: mock server accepts delete request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST request, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": null, "error": null}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	err := client.DeleteDecks([]string{"Test Deck", "Japanese::JLPT N3"})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestClient_DeleteDecks_APIError(t *testing.T) {
+	// Setup: mock server returns API error
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": null, "error": "collection is not available"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	err := client.DeleteDecks([]string{"Test Deck"})
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "collection is not available" {
+		t.Errorf("expected error message 'collection is not available', got %q", err.Error())
+	}
+}
+
+func TestClient_DeleteDecks_ConnectionError(t *testing.T) {
+	// Setup: client with invalid URL (no server running)
+	client := NewClient("http://localhost:59999")
+	err := client.DeleteDecks([]string{"Test Deck"})
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestClient_DeleteDecks_EmptyList(t *testing.T) {
+	// Empty list is valid (no-op)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": null, "error": null}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	err := client.DeleteDecks([]string{})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

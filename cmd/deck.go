@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/atdrendel/ankigo/internal/ankiconnect"
@@ -16,6 +19,8 @@ type Client interface {
 	DeckNames() ([]string, error)
 	DeckNamesAndIds() (map[string]int64, error)
 	GetDeckStats(decks []string) (map[int64]ankiconnect.DeckStats, error)
+	CreateDeck(name string) (int64, error)
+	DeleteDecks(decks []string) error
 }
 
 // deckListFields are the available fields for deck list output.
@@ -299,16 +304,156 @@ var deckCreateCmd = &cobra.Command{
 	Long:  `Create a new deck with the specified name.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
-		fmt.Fprintf(cmd.OutOrStdout(), "deck create %q: not yet implemented\n", name)
-		return nil
+		client := ankiconnect.DefaultClient()
+		return runDeckCreate(client, cmd.OutOrStdout(), args[0])
 	},
+}
+
+// runDeckCreate is the testable implementation of deck create.
+func runDeckCreate(client Client, out io.Writer, name string) error {
+	trimmedName := strings.TrimSpace(name)
+	if trimmedName == "" {
+		return fmt.Errorf("deck name cannot be empty")
+	}
+
+	deckID, err := client.CreateDeck(name)
+	if err != nil {
+		return fmt.Errorf("failed to create deck: %w", err)
+	}
+
+	fmt.Fprintln(out, deckID)
+	return nil
+}
+
+var deckDeleteCmd = &cobra.Command{
+	Use:          "delete [deck-names...]",
+	Short:        "Delete one or more decks",
+	Long:         `Delete one or more decks and all their cards. Requires --force flag or confirmation.`,
+	Args:         cobra.MinimumNArgs(1),
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client := ankiconnect.DefaultClient()
+		force, _ := cmd.Flags().GetBool("force")
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		byID, _ := cmd.Flags().GetBool("id")
+		return runDeckDelete(client, os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), args, force, dryRun, byID)
+	},
+}
+
+// runDeckDelete is the testable implementation of deck delete.
+func runDeckDelete(client Client, stdin io.Reader, stdout, stderr io.Writer, args []string, force, dryRun, byID bool) error {
+	if len(args) == 0 {
+		return fmt.Errorf("at least one deck name is required")
+	}
+
+	var decks []string
+	var existingDecks map[string]struct{}
+
+	if byID {
+		// Parse IDs and resolve to names
+		deckMap, err := client.DeckNamesAndIds()
+		if err != nil {
+			return fmt.Errorf("failed to get deck names: %w", err)
+		}
+		// Invert map: id -> name
+		idToName := make(map[int64]string)
+		for name, id := range deckMap {
+			idToName[id] = name
+		}
+		for _, arg := range args {
+			id, err := strconv.ParseInt(arg, 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid deck ID %q: must be a number", arg)
+			}
+			name, ok := idToName[id]
+			if !ok {
+				return fmt.Errorf("deck with ID %d not found", id)
+			}
+			decks = append(decks, name)
+		}
+		// All decks exist since we resolved them from IDs
+		existingDecks = make(map[string]struct{})
+		for _, name := range decks {
+			existingDecks[name] = struct{}{}
+		}
+	} else {
+		decks = args
+		// Fetch existing deck names to validate
+		existingNames, err := client.DeckNames()
+		if err != nil {
+			return fmt.Errorf("failed to get deck names: %w", err)
+		}
+		existingDecks = make(map[string]struct{})
+		for _, name := range existingNames {
+			existingDecks[name] = struct{}{}
+		}
+	}
+
+	// Partition decks into found and not found
+	var found, notFound []string
+	for _, deck := range decks {
+		if _, ok := existingDecks[deck]; ok {
+			found = append(found, deck)
+		} else {
+			notFound = append(notFound, deck)
+		}
+	}
+
+	if dryRun {
+		fmt.Fprintln(stderr, "Would delete the following decks (and all their cards):")
+		for _, deck := range decks {
+			fmt.Fprintln(stdout, deck)
+		}
+		return nil
+	}
+
+	if !force {
+		fmt.Fprintln(stderr, "The following decks will be deleted (including all cards):")
+		for _, deck := range decks {
+			fmt.Fprintf(stderr, "  - %s\n", deck)
+		}
+		fmt.Fprint(stderr, "Continue? [y/N] ")
+
+		reader := bufio.NewReader(stdin)
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			return ErrCancelled
+		}
+		response = strings.TrimSpace(strings.ToLower(response))
+		if response != "y" && response != "yes" {
+			return ErrCancelled
+		}
+	}
+
+	// Delete only the decks that exist
+	if len(found) > 0 {
+		if err := client.DeleteDecks(found); err != nil {
+			return fmt.Errorf("failed to delete decks: %w", err)
+		}
+		for _, deck := range found {
+			fmt.Fprintf(stderr, "Deleted %s\n", deck)
+		}
+	}
+
+	// Report decks that were not found
+	for _, deck := range notFound {
+		fmt.Fprintf(stderr, "Could not find %s\n", deck)
+	}
+
+	if len(notFound) > 0 {
+		return ErrSilent
+	}
+	return nil
 }
 
 func init() {
 	deckListCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output in JSON format")
 	deckListCmd.Flags().StringVarP(&fieldsFlag, "fields", "f", "", "Comma-separated list of fields (available: id, name, new, learn, review, total)")
+	deckDeleteCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
+	deckDeleteCmd.Flags().Bool("dry-run", false, "Show what would be deleted without executing")
+	deckDeleteCmd.Flags().Bool("id", false, "Treat arguments as deck IDs instead of names")
 	deckCmd.AddCommand(deckListCmd)
 	deckCmd.AddCommand(deckCreateCmd)
+	deckCmd.AddCommand(deckDeleteCmd)
 	rootCmd.AddCommand(deckCmd)
 }
