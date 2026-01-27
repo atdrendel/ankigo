@@ -21,6 +21,8 @@ type Client interface {
 	GetDeckStats(decks []string) (map[int64]ankiconnect.DeckStats, error)
 	CreateDeck(name string) (int64, error)
 	DeleteDecks(decks []string) error
+	FindCards(query string) ([]int64, error)
+	CardsInfo(cardIDs []int64) ([]ankiconnect.CardInfo, error)
 }
 
 // deckListFields are the available fields for deck list output.

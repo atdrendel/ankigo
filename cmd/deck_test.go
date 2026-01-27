@@ -22,6 +22,13 @@ type mockClient struct {
 	createdDeck    string // captures name passed to CreateDeck
 	deleteDecksErr error
 	deletedDecks   []string // captures names passed to DeleteDecks
+
+	// Card search fields
+	cardIDs      []int64
+	cardInfo     []ankiconnect.CardInfo
+	findCardsErr error
+	cardsInfoErr error
+	searchQuery  string // captures query passed to FindCards
 }
 
 func (m *mockClient) DeckNames() ([]string, error) {
@@ -44,6 +51,15 @@ func (m *mockClient) CreateDeck(name string) (int64, error) {
 func (m *mockClient) DeleteDecks(decks []string) error {
 	m.deletedDecks = decks
 	return m.deleteDecksErr
+}
+
+func (m *mockClient) FindCards(query string) ([]int64, error) {
+	m.searchQuery = query
+	return m.cardIDs, m.findCardsErr
+}
+
+func (m *mockClient) CardsInfo(cardIDs []int64) ([]ankiconnect.CardInfo, error) {
+	return m.cardInfo, m.cardsInfoErr
 }
 
 func TestDeckList_PlainText_Default(t *testing.T) {

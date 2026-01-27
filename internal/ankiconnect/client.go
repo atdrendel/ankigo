@@ -18,6 +18,35 @@ type DeckStats struct {
 	TotalInDeck int    `json:"total_in_deck"`
 }
 
+// CardField represents a single field in a card.
+type CardField struct {
+	Value string `json:"value"`
+	Order int    `json:"order"`
+}
+
+// CardInfo contains detailed information about a card.
+type CardInfo struct {
+	CardID     int64                `json:"cardId"`
+	Fields     map[string]CardField `json:"fields"`
+	FieldOrder int                  `json:"fieldOrder"`
+	Question   string               `json:"question"`
+	Answer     string               `json:"answer"`
+	ModelName  string               `json:"modelName"`
+	Ord        int                  `json:"ord"`
+	DeckName   string               `json:"deckName"`
+	CSS        string               `json:"css"`
+	Factor     int                  `json:"factor"`
+	Interval   int                  `json:"interval"`
+	Note       int64                `json:"note"`
+	Type       int                  `json:"type"`
+	Queue      int                  `json:"queue"`
+	Due        int                  `json:"due"`
+	Reps       int                  `json:"reps"`
+	Lapses     int                  `json:"lapses"`
+	Left       int                  `json:"left"`
+	Mod        int64                `json:"mod"`
+}
+
 // Client defines the interface for interacting with anki-connect.
 type Client interface {
 	DeckNames() ([]string, error)
@@ -25,6 +54,8 @@ type Client interface {
 	GetDeckStats(decks []string) (map[int64]DeckStats, error)
 	CreateDeck(name string) (int64, error)
 	DeleteDecks(decks []string) error
+	FindCards(query string) ([]int64, error)
+	CardsInfo(cardIDs []int64) ([]CardInfo, error)
 }
 
 // HTTPClient is the real implementation that communicates with anki-connect.
@@ -242,4 +273,76 @@ func (c *HTTPClient) DeleteDecks(decks []string) error {
 	}
 
 	return nil
+}
+
+// FindCards searches for cards matching the query and returns card IDs.
+func (c *HTTPClient) FindCards(query string) ([]int64, error) {
+	req := request{
+		Action:  "findCards",
+		Version: 6,
+		Params:  map[string]interface{}{"query": query},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	if apiResp.Error != nil {
+		return nil, errors.New(*apiResp.Error)
+	}
+
+	var cardIDs []int64
+	if err := json.Unmarshal(apiResp.Result, &cardIDs); err != nil {
+		return nil, err
+	}
+
+	return cardIDs, nil
+}
+
+// CardsInfo returns detailed information for the given card IDs.
+func (c *HTTPClient) CardsInfo(cardIDs []int64) ([]CardInfo, error) {
+	req := request{
+		Action:  "cardsInfo",
+		Version: 6,
+		Params:  map[string]interface{}{"cards": cardIDs},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	if apiResp.Error != nil {
+		return nil, errors.New(*apiResp.Error)
+	}
+
+	var cards []CardInfo
+	if err := json.Unmarshal(apiResp.Result, &cards); err != nil {
+		return nil, err
+	}
+
+	return cards, nil
 }
