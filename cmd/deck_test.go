@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -29,6 +30,15 @@ type mockClient struct {
 	findCardsErr error
 	cardsInfoErr error
 	searchQuery  string // captures query passed to FindCards
+
+	// Card add fields
+	addedNote       *ankiconnect.Note // captures note passed to AddNote
+	addNoteID       int64
+	addNoteErr      error
+	modelNames      []string
+	modelNamesErr   error
+	modelFieldNames map[string][]string // model name -> field names
+	modelFieldsErr  error
 }
 
 func (m *mockClient) DeckNames() ([]string, error) {
@@ -60,6 +70,29 @@ func (m *mockClient) FindCards(query string) ([]int64, error) {
 
 func (m *mockClient) CardsInfo(cardIDs []int64) ([]ankiconnect.CardInfo, error) {
 	return m.cardInfo, m.cardsInfoErr
+}
+
+func (m *mockClient) AddNote(note ankiconnect.Note) (int64, error) {
+	m.addedNote = &note
+	return m.addNoteID, m.addNoteErr
+}
+
+func (m *mockClient) ModelNames() ([]string, error) {
+	return m.modelNames, m.modelNamesErr
+}
+
+func (m *mockClient) ModelFieldNames(modelName string) ([]string, error) {
+	if m.modelFieldsErr != nil {
+		return nil, m.modelFieldsErr
+	}
+	if m.modelFieldNames == nil {
+		return nil, nil
+	}
+	fields, ok := m.modelFieldNames[modelName]
+	if !ok {
+		return nil, fmt.Errorf("model was not found: %s", modelName)
+	}
+	return fields, nil
 }
 
 func TestDeckList_PlainText_Default(t *testing.T) {

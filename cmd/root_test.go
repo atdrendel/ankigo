@@ -38,8 +38,8 @@ func TestRootCommand(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name:       "card add requires flags",
-			args:       []string{"card", "add"},
+			name:       "card create requires flags",
+			args:       []string{"card", "create"},
 			wantOutput: "",
 			wantErr:    true,
 		},

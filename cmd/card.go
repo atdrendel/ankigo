@@ -10,11 +10,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	cardFront string
-	cardBack  string
-	cardDeck  string
-)
+// cardCreateOptions holds all options for the card add command.
+type cardCreateOptions struct {
+	deck           string
+	model          string
+	front          string
+	back           string
+	fields         map[string]string
+	tags           []string
+	allowDuplicate bool
+	duplicateScope string
+}
 
 // cardSearchFields are the available fields for card search output.
 var cardSearchFields = []string{
@@ -46,17 +52,171 @@ var cardCmd = &cobra.Command{
 	Long:  `Commands for adding, searching, and managing Anki cards.`,
 }
 
-var cardAddCmd = &cobra.Command{
-	Use:   "add",
-	Short: "Add a new card",
-	Long:  `Add a new flashcard to a deck with front and back content.`,
+var cardCreateCmd = &cobra.Command{
+	Use:   "create",
+	Short: "Create a new card",
+	Long: `Create a new flashcard in a deck.
+
+For the default "Basic" model, use --front and --back flags:
+  ankigo card create --front "Question" --back "Answer"
+
+For other models, use --field to set arbitrary fields:
+  ankigo card create --model "Cloze" --field "Text={{c1::answer}}"
+
+The --front and --back flags are shortcuts that set "Front" and "Back" fields.`,
+	Example: `  # Basic card
+  ankigo card create --front "What is Go?" --back "A programming language"
+
+  # Card with tags
+  ankigo card create --front "猫" --back "cat" --tags japanese,vocabulary
+
+  # Card in a specific deck
+  ankigo card create --deck "Japanese::JLPT N3" --front "日本" --back "Japan"
+
+  # Cloze deletion card
+  ankigo card create --model "Cloze" --field "Text=The capital of {{c1::France}} is {{c2::Paris}}"
+
+  # Allow duplicate
+  ankigo card create --front "repeat" --back "answer" --allow-duplicate`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Fprintf(cmd.OutOrStdout(), "card add: not yet implemented\n")
-		fmt.Fprintf(cmd.OutOrStdout(), "  deck:  %s\n", cardDeck)
-		fmt.Fprintf(cmd.OutOrStdout(), "  front: %s\n", cardFront)
-		fmt.Fprintf(cmd.OutOrStdout(), "  back:  %s\n", cardBack)
-		return nil
+		client := ankiconnect.DefaultClient()
+
+		deck, _ := cmd.Flags().GetString("deck")
+		model, _ := cmd.Flags().GetString("model")
+		front, _ := cmd.Flags().GetString("front")
+		back, _ := cmd.Flags().GetString("back")
+		fieldFlags, _ := cmd.Flags().GetStringArray("field")
+		tagsFlag, _ := cmd.Flags().GetStringSlice("tags")
+		allowDup, _ := cmd.Flags().GetBool("allow-duplicate")
+		dupScope, _ := cmd.Flags().GetString("duplicate-scope")
+
+		// Parse --field flags into map
+		fields := make(map[string]string)
+		for _, f := range fieldFlags {
+			parts := strings.SplitN(f, "=", 2)
+			if len(parts) != 2 {
+				return fmt.Errorf("invalid field format %q: expected Name=value", f)
+			}
+			fields[parts[0]] = parts[1]
+		}
+
+		opts := cardCreateOptions{
+			deck:           deck,
+			model:          model,
+			front:          front,
+			back:           back,
+			fields:         fields,
+			tags:           tagsFlag,
+			allowDuplicate: allowDup,
+			duplicateScope: dupScope,
+		}
+
+		return runCardCreate(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 	},
+}
+
+// runCardCreate is the testable implementation of card add.
+func runCardCreate(client Client, stdout, stderr io.Writer, opts cardCreateOptions) error {
+	// Build the fields map
+	fields := make(map[string]string)
+
+	// Copy explicit field flags first
+	for k, v := range opts.fields {
+		fields[k] = v
+	}
+
+	// Apply --front and --back as convenience shortcuts (they override --field)
+	if opts.front != "" {
+		fields["Front"] = opts.front
+	}
+	if opts.back != "" {
+		fields["Back"] = opts.back
+	}
+
+	// Validate: for Basic model, require Front and Back
+	if opts.model == "Basic" {
+		if fields["Front"] == "" {
+			return fmt.Errorf("--front is required for Basic model")
+		}
+		if fields["Back"] == "" {
+			return fmt.Errorf("--back is required for Basic model")
+		}
+	}
+
+	// Validate: at least one field must be set
+	if len(fields) == 0 {
+		return fmt.Errorf("at least one field must be provided (use --front/--back or --field)")
+	}
+
+	// Validate model exists
+	modelNames, err := client.ModelNames()
+	if err != nil {
+		return fmt.Errorf("failed to get model names: %w", err)
+	}
+
+	modelExists := false
+	for _, m := range modelNames {
+		if m == opts.model {
+			modelExists = true
+			break
+		}
+	}
+	if !modelExists {
+		return fmt.Errorf("model %q not found", opts.model)
+	}
+
+	// Validate field names (warn, don't fail)
+	modelFields, err := client.ModelFieldNames(opts.model)
+	if err == nil {
+		modelFieldSet := make(map[string]bool)
+		for _, f := range modelFields {
+			modelFieldSet[f] = true
+		}
+		for fieldName := range fields {
+			if !modelFieldSet[fieldName] {
+				fmt.Fprintf(stderr, "warning: field %q is not in model %q (available: %s)\n",
+					fieldName, opts.model, strings.Join(modelFields, ", "))
+			}
+		}
+	}
+
+	// Build the note
+	note := ankiconnect.Note{
+		DeckName:  opts.deck,
+		ModelName: opts.model,
+		Fields:    fields,
+		Tags:      opts.tags,
+	}
+
+	// Add duplicate options if specified
+	if opts.allowDuplicate || opts.duplicateScope != "" {
+		note.Options = &ankiconnect.NoteOptions{
+			AllowDuplicate: opts.allowDuplicate,
+			DuplicateScope: opts.duplicateScope,
+		}
+	}
+
+	// Create the note
+	noteID, err := client.AddNote(note)
+	if err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "cannot create note because it is a duplicate") {
+			return fmt.Errorf("card already exists (use --allow-duplicate to add anyway)")
+		}
+		if strings.Contains(errMsg, "cannot create note because it is empty") {
+			return fmt.Errorf("card content cannot be empty")
+		}
+		if strings.Contains(errMsg, "model was not found") {
+			return fmt.Errorf("model %q not found", opts.model)
+		}
+		if strings.Contains(errMsg, "deck was not found") {
+			return fmt.Errorf("deck %q not found", opts.deck)
+		}
+		return fmt.Errorf("failed to add card: %w", err)
+	}
+
+	fmt.Fprintln(stdout, noteID)
+	return nil
 }
 
 var cardSearchCmd = &cobra.Command{
@@ -434,17 +594,19 @@ func getCardFieldJSON(e cardEntry, field string) interface{} {
 }
 
 func init() {
-	cardAddCmd.Flags().StringVarP(&cardFront, "front", "f", "", "front of the card (required)")
-	cardAddCmd.Flags().StringVarP(&cardBack, "back", "b", "", "back of the card (required)")
-	cardAddCmd.Flags().StringVarP(&cardDeck, "deck", "d", "Default", "deck to add the card to")
-
-	cardAddCmd.MarkFlagRequired("front")
-	cardAddCmd.MarkFlagRequired("back")
+	cardCreateCmd.Flags().StringP("deck", "d", "Default", "deck to add the card to")
+	cardCreateCmd.Flags().StringP("model", "m", "Basic", "note type (model) to use")
+	cardCreateCmd.Flags().StringP("front", "f", "", "front of the card (for Basic model)")
+	cardCreateCmd.Flags().StringP("back", "b", "", "back of the card (for Basic model)")
+	cardCreateCmd.Flags().StringArray("field", nil, `set a field value (format: "FieldName=value", repeatable)`)
+	cardCreateCmd.Flags().StringSlice("tags", nil, "tags for the card (comma-separated or repeatable)")
+	cardCreateCmd.Flags().Bool("allow-duplicate", false, "allow adding duplicate cards")
+	cardCreateCmd.Flags().String("duplicate-scope", "", `scope for duplicate check: "deck" or empty for collection-wide`)
 
 	cardSearchCmd.Flags().Bool("json", false, "Output in JSON format")
 	cardSearchCmd.Flags().StringP("fields", "f", "", "Comma-separated list of fields (available: id, note, deck, model, ord, question, answer, fields, type, queue, due, interval, factor, reps, lapses, left, mod, fieldOrder, css)")
 
-	cardCmd.AddCommand(cardAddCmd)
+	cardCmd.AddCommand(cardCreateCmd)
 	cardCmd.AddCommand(cardSearchCmd)
 	rootCmd.AddCommand(cardCmd)
 }

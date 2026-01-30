@@ -24,6 +24,29 @@ type CardField struct {
 	Order int    `json:"order"`
 }
 
+// Note represents a note to be added to Anki.
+type Note struct {
+	DeckName  string            `json:"deckName"`
+	ModelName string            `json:"modelName"`
+	Fields    map[string]string `json:"fields"`
+	Tags      []string          `json:"tags,omitempty"`
+	Options   *NoteOptions      `json:"options,omitempty"`
+}
+
+// NoteOptions contains options for duplicate handling.
+type NoteOptions struct {
+	AllowDuplicate        bool                   `json:"allowDuplicate,omitempty"`
+	DuplicateScope        string                 `json:"duplicateScope,omitempty"`
+	DuplicateScopeOptions *DuplicateScopeOptions `json:"duplicateScopeOptions,omitempty"`
+}
+
+// DuplicateScopeOptions contains advanced duplicate checking options.
+type DuplicateScopeOptions struct {
+	DeckName       string `json:"deckName,omitempty"`
+	CheckChildren  bool   `json:"checkChildren,omitempty"`
+	CheckAllModels bool   `json:"checkAllModels,omitempty"`
+}
+
 // CardInfo contains detailed information about a card.
 type CardInfo struct {
 	CardID     int64                `json:"cardId"`
@@ -56,6 +79,9 @@ type Client interface {
 	DeleteDecks(decks []string) error
 	FindCards(query string) ([]int64, error)
 	CardsInfo(cardIDs []int64) ([]CardInfo, error)
+	AddNote(note Note) (int64, error)
+	ModelNames() ([]string, error)
+	ModelFieldNames(modelName string) ([]string, error)
 }
 
 // HTTPClient is the real implementation that communicates with anki-connect.
@@ -345,4 +371,116 @@ func (c *HTTPClient) CardsInfo(cardIDs []int64) ([]CardInfo, error) {
 	}
 
 	return cards, nil
+}
+
+// AddNote creates a note and returns the note ID.
+func (c *HTTPClient) AddNote(note Note) (int64, error) {
+	req := request{
+		Action:  "addNote",
+		Version: 6,
+		Params:  map[string]interface{}{"note": note},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return 0, err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return 0, err
+	}
+
+	if apiResp.Error != nil {
+		return 0, errors.New(*apiResp.Error)
+	}
+
+	// Result can be null on failure
+	if string(apiResp.Result) == "null" {
+		return 0, errors.New("failed to create note")
+	}
+
+	var noteID int64
+	if err := json.Unmarshal(apiResp.Result, &noteID); err != nil {
+		return 0, err
+	}
+
+	return noteID, nil
+}
+
+// ModelNames returns all model (note type) names.
+func (c *HTTPClient) ModelNames() ([]string, error) {
+	req := request{
+		Action:  "modelNames",
+		Version: 6,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	if apiResp.Error != nil {
+		return nil, errors.New(*apiResp.Error)
+	}
+
+	var models []string
+	if err := json.Unmarshal(apiResp.Result, &models); err != nil {
+		return nil, err
+	}
+
+	return models, nil
+}
+
+// ModelFieldNames returns the field names for a given model.
+func (c *HTTPClient) ModelFieldNames(modelName string) ([]string, error) {
+	req := request{
+		Action:  "modelFieldNames",
+		Version: 6,
+		Params:  map[string]interface{}{"modelName": modelName},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	if apiResp.Error != nil {
+		return nil, errors.New(*apiResp.Error)
+	}
+
+	var fields []string
+	if err := json.Unmarshal(apiResp.Result, &fields); err != nil {
+		return nil, err
+	}
+
+	return fields, nil
 }

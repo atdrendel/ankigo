@@ -434,3 +434,343 @@ func TestClient_DeleteDecks_EmptyList(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// === AddNote Tests ===
+
+func TestClient_AddNote_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST request, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": 1234567890, "error": null}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	note := Note{
+		DeckName:  "Default",
+		ModelName: "Basic",
+		Fields:    map[string]string{"Front": "Q", "Back": "A"},
+		Tags:      []string{"test"},
+	}
+
+	noteID, err := client.AddNote(note)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if noteID != 1234567890 {
+		t.Errorf("expected note ID 1234567890, got %d", noteID)
+	}
+}
+
+func TestClient_AddNote_DuplicateError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": null, "error": "cannot create note because it is a duplicate"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	note := Note{
+		DeckName:  "Default",
+		ModelName: "Basic",
+		Fields:    map[string]string{"Front": "Q", "Back": "A"},
+	}
+
+	noteID, err := client.AddNote(note)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if noteID != 0 {
+		t.Errorf("expected note ID 0, got %d", noteID)
+	}
+	if err.Error() != "cannot create note because it is a duplicate" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestClient_AddNote_NullResult(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": null, "error": null}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	note := Note{
+		DeckName:  "Default",
+		ModelName: "Basic",
+		Fields:    map[string]string{"Front": "Q", "Back": "A"},
+	}
+
+	noteID, err := client.AddNote(note)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if noteID != 0 {
+		t.Errorf("expected note ID 0, got %d", noteID)
+	}
+}
+
+func TestClient_AddNote_WithOptions(t *testing.T) {
+	var receivedBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody = make([]byte, r.ContentLength)
+		r.Body.Read(receivedBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": 1234567890, "error": null}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	note := Note{
+		DeckName:  "Default",
+		ModelName: "Basic",
+		Fields:    map[string]string{"Front": "Q", "Back": "A"},
+		Options: &NoteOptions{
+			AllowDuplicate: true,
+			DuplicateScope: "deck",
+		},
+	}
+
+	noteID, err := client.AddNote(note)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if noteID != 1234567890 {
+		t.Errorf("expected note ID 1234567890, got %d", noteID)
+	}
+
+	// Verify options were sent in request
+	bodyStr := string(receivedBody)
+	if !contains(bodyStr, `"allowDuplicate":true`) {
+		t.Error("expected allowDuplicate:true in request body")
+	}
+	if !contains(bodyStr, `"duplicateScope":"deck"`) {
+		t.Error("expected duplicateScope:deck in request body")
+	}
+}
+
+func TestClient_AddNote_ConnectionError(t *testing.T) {
+	client := NewClient("http://localhost:59999")
+	note := Note{
+		DeckName:  "Default",
+		ModelName: "Basic",
+		Fields:    map[string]string{"Front": "Q", "Back": "A"},
+	}
+
+	noteID, err := client.AddNote(note)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if noteID != 0 {
+		t.Errorf("expected note ID 0, got %d", noteID)
+	}
+}
+
+func TestClient_AddNote_InvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`not valid json`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	note := Note{
+		DeckName:  "Default",
+		ModelName: "Basic",
+		Fields:    map[string]string{"Front": "Q", "Back": "A"},
+	}
+
+	noteID, err := client.AddNote(note)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if noteID != 0 {
+		t.Errorf("expected note ID 0, got %d", noteID)
+	}
+}
+
+// === ModelNames Tests ===
+
+func TestClient_ModelNames_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST request, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": ["Basic", "Basic (and reversed card)", "Cloze"], "error": null}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	models, err := client.ModelNames()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(models) != 3 {
+		t.Fatalf("expected 3 models, got %d", len(models))
+	}
+	if models[0] != "Basic" {
+		t.Errorf("expected first model 'Basic', got %q", models[0])
+	}
+	if models[2] != "Cloze" {
+		t.Errorf("expected third model 'Cloze', got %q", models[2])
+	}
+}
+
+func TestClient_ModelNames_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": null, "error": "collection is not available"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	models, err := client.ModelNames()
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if models != nil {
+		t.Errorf("expected nil models, got %v", models)
+	}
+	if err.Error() != "collection is not available" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestClient_ModelNames_Empty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": [], "error": null}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	models, err := client.ModelNames()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(models) != 0 {
+		t.Errorf("expected 0 models, got %d", len(models))
+	}
+}
+
+func TestClient_ModelNames_ConnectionError(t *testing.T) {
+	client := NewClient("http://localhost:59999")
+	models, err := client.ModelNames()
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if models != nil {
+		t.Errorf("expected nil models, got %v", models)
+	}
+}
+
+// === ModelFieldNames Tests ===
+
+func TestClient_ModelFieldNames_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST request, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": ["Front", "Back"], "error": null}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	fields, err := client.ModelFieldNames("Basic")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(fields))
+	}
+	if fields[0] != "Front" {
+		t.Errorf("expected first field 'Front', got %q", fields[0])
+	}
+	if fields[1] != "Back" {
+		t.Errorf("expected second field 'Back', got %q", fields[1])
+	}
+}
+
+func TestClient_ModelFieldNames_ModelNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": null, "error": "model was not found: NonExistent"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	fields, err := client.ModelFieldNames("NonExistent")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if fields != nil {
+		t.Errorf("expected nil fields, got %v", fields)
+	}
+	if err.Error() != "model was not found: NonExistent" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestClient_ModelFieldNames_ClozeModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"result": ["Text", "Extra"], "error": null}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	fields, err := client.ModelFieldNames("Cloze")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(fields))
+	}
+	if fields[0] != "Text" {
+		t.Errorf("expected first field 'Text', got %q", fields[0])
+	}
+}
+
+func TestClient_ModelFieldNames_ConnectionError(t *testing.T) {
+	client := NewClient("http://localhost:59999")
+	fields, err := client.ModelFieldNames("Basic")
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if fields != nil {
+		t.Errorf("expected nil fields, got %v", fields)
+	}
+}
+
+// Helper function for checking substrings
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
+}
+
+func containsHelper(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

@@ -23,6 +23,9 @@ type Client interface {
 	DeleteDecks(decks []string) error
 	FindCards(query string) ([]int64, error)
 	CardsInfo(cardIDs []int64) ([]ankiconnect.CardInfo, error)
+	AddNote(note ankiconnect.Note) (int64, error)
+	ModelNames() ([]string, error)
+	ModelFieldNames(modelName string) ([]string, error)
 }
 
 // deckListFields are the available fields for deck list output.

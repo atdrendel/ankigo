@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/atdrendel/ankigo/internal/ankiconnect"
@@ -503,5 +504,516 @@ func TestCardSearch_JSON_CardsInfoMissing(t *testing.T) {
 	}
 	if entry["reps"].(float64) != 0 {
 		t.Errorf("expected reps 0, got %v", entry["reps"])
+	}
+}
+
+// === Card Create Tests ===
+
+func TestCardCreate_Basic_Success(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:  1234567890,
+		modelNames: []string{"Basic", "Cloze"},
+		modelFieldNames: map[string][]string{
+			"Basic": {"Front", "Back"},
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Basic",
+		front: "Question?",
+		back:  "Answer",
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.addedNote == nil {
+		t.Fatal("expected AddNote to be called")
+	}
+	if mock.addedNote.DeckName != "Default" {
+		t.Errorf("expected deck 'Default', got %q", mock.addedNote.DeckName)
+	}
+	if mock.addedNote.ModelName != "Basic" {
+		t.Errorf("expected model 'Basic', got %q", mock.addedNote.ModelName)
+	}
+	if mock.addedNote.Fields["Front"] != "Question?" {
+		t.Errorf("expected Front 'Question?', got %q", mock.addedNote.Fields["Front"])
+	}
+	if mock.addedNote.Fields["Back"] != "Answer" {
+		t.Errorf("expected Back 'Answer', got %q", mock.addedNote.Fields["Back"])
+	}
+	if stdout.String() != "1234567890\n" {
+		t.Errorf("expected stdout '1234567890\\n', got %q", stdout.String())
+	}
+}
+
+func TestCardCreate_Basic_MissingFront(t *testing.T) {
+	mock := &mockClient{
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Basic",
+		back:  "Answer",
+		// front is missing
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "--front is required for Basic model" {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if mock.addedNote != nil {
+		t.Error("expected AddNote NOT to be called")
+	}
+}
+
+func TestCardCreate_Basic_MissingBack(t *testing.T) {
+	mock := &mockClient{
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Basic",
+		front: "Question?",
+		// back is missing
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "--back is required for Basic model" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCardCreate_WithTags(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:       1234567890,
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Basic",
+		front: "Q",
+		back:  "A",
+		tags:  []string{"tag1", "tag2", "tag3"},
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.addedNote.Tags) != 3 {
+		t.Errorf("expected 3 tags, got %d", len(mock.addedNote.Tags))
+	}
+	if mock.addedNote.Tags[0] != "tag1" {
+		t.Errorf("expected first tag 'tag1', got %q", mock.addedNote.Tags[0])
+	}
+}
+
+func TestCardCreate_CustomDeck(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:       1234567890,
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Japanese::JLPT N3",
+		model: "Basic",
+		front: "日本",
+		back:  "Japan",
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.addedNote.DeckName != "Japanese::JLPT N3" {
+		t.Errorf("expected deck 'Japanese::JLPT N3', got %q", mock.addedNote.DeckName)
+	}
+}
+
+func TestCardCreate_ModelNotFound(t *testing.T) {
+	mock := &mockClient{
+		modelNames: []string{"Basic", "Cloze"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "NonExistent",
+		front: "Q",
+		back:  "A",
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != `model "NonExistent" not found` {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCardCreate_DuplicateError(t *testing.T) {
+	mock := &mockClient{
+		addNoteErr:      errors.New("cannot create note because it is a duplicate"),
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Basic",
+		front: "Q",
+		back:  "A",
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "card already exists (use --allow-duplicate to add anyway)" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCardCreate_AllowDuplicate(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:       1234567890,
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:           "Default",
+		model:          "Basic",
+		front:          "Q",
+		back:           "A",
+		allowDuplicate: true,
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.addedNote.Options == nil {
+		t.Fatal("expected Options to be set")
+	}
+	if !mock.addedNote.Options.AllowDuplicate {
+		t.Error("expected AllowDuplicate to be true")
+	}
+}
+
+func TestCardCreate_DuplicateScopeDeck(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:       1234567890,
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:           "Default",
+		model:          "Basic",
+		front:          "Q",
+		back:           "A",
+		duplicateScope: "deck",
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.addedNote.Options == nil {
+		t.Fatal("expected Options to be set")
+	}
+	if mock.addedNote.Options.DuplicateScope != "deck" {
+		t.Errorf("expected DuplicateScope 'deck', got %q", mock.addedNote.Options.DuplicateScope)
+	}
+}
+
+func TestCardCreate_ClozeModel(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:  1234567890,
+		modelNames: []string{"Basic", "Cloze"},
+		modelFieldNames: map[string][]string{
+			"Cloze": {"Text", "Extra"},
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Cloze",
+		fields: map[string]string{
+			"Text":  "The capital of {{c1::France}} is {{c2::Paris}}",
+			"Extra": "Geography",
+		},
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.addedNote.ModelName != "Cloze" {
+		t.Errorf("expected model 'Cloze', got %q", mock.addedNote.ModelName)
+	}
+	if mock.addedNote.Fields["Text"] != "The capital of {{c1::France}} is {{c2::Paris}}" {
+		t.Errorf("unexpected Text field: %q", mock.addedNote.Fields["Text"])
+	}
+	if mock.addedNote.Fields["Extra"] != "Geography" {
+		t.Errorf("unexpected Extra field: %q", mock.addedNote.Fields["Extra"])
+	}
+}
+
+func TestCardCreate_MixedFrontBackAndField(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:  1234567890,
+		modelNames: []string{"Basic (and reversed card)"},
+		modelFieldNames: map[string][]string{
+			"Basic (and reversed card)": {"Front", "Back"},
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Basic (and reversed card)",
+		front: "Q",
+		back:  "A",
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.addedNote.Fields["Front"] != "Q" {
+		t.Errorf("expected Front 'Q', got %q", mock.addedNote.Fields["Front"])
+	}
+	if mock.addedNote.Fields["Back"] != "A" {
+		t.Errorf("expected Back 'A', got %q", mock.addedNote.Fields["Back"])
+	}
+}
+
+func TestCardCreate_InvalidFieldWarning(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:       1234567890,
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Basic",
+		front: "Q",
+		back:  "A",
+		fields: map[string]string{
+			"InvalidField": "value",
+		},
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	// Should succeed but warn
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "warning") {
+		t.Errorf("expected warning on stderr, got %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "InvalidField") {
+		t.Errorf("expected warning to mention 'InvalidField', got %q", stderr.String())
+	}
+}
+
+func TestCardCreate_NoFieldsError(t *testing.T) {
+	mock := &mockClient{
+		modelNames: []string{"Custom"},
+		modelFieldNames: map[string][]string{
+			"Custom": {"Field1", "Field2"},
+		},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Custom",
+		// No front, back, or fields
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "at least one field must be provided") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCardCreate_ConnectionError(t *testing.T) {
+	mock := &mockClient{
+		modelNamesErr: errors.New("connection refused"),
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Basic",
+		front: "Q",
+		back:  "A",
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to get model names") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCardCreate_DeckNotFoundError(t *testing.T) {
+	mock := &mockClient{
+		addNoteErr:      errors.New("deck was not found: NonExistent"),
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "NonExistent",
+		model: "Basic",
+		front: "Q",
+		back:  "A",
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != `deck "NonExistent" not found` {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCardCreate_EmptyContentError(t *testing.T) {
+	mock := &mockClient{
+		addNoteErr:      errors.New("cannot create note because it is empty"),
+		modelNames:      []string{"Custom"},
+		modelFieldNames: map[string][]string{"Custom": {"Field1"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Custom",
+		fields: map[string]string{
+			"Field1": "",
+		},
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "card content cannot be empty" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestCardCreate_ModelFieldsError_StillSucceeds(t *testing.T) {
+	// If we can't fetch field names for validation, the command should still work
+	mock := &mockClient{
+		addNoteID:      1234567890,
+		modelNames:     []string{"Basic"},
+		modelFieldsErr: errors.New("some error"),
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Basic",
+		front: "Q",
+		back:  "A",
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	// Should succeed - field validation is optional
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.String() != "1234567890\n" {
+		t.Errorf("expected note ID output, got %q", stdout.String())
+	}
+}
+
+func TestCardCreate_FieldOverridesFrontBack(t *testing.T) {
+	// When both --field and --front/--back are provided, --front/--back take precedence
+	mock := &mockClient{
+		addNoteID:       1234567890,
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := cardCreateOptions{
+		deck:  "Default",
+		model: "Basic",
+		front: "from front flag",
+		back:  "from back flag",
+		fields: map[string]string{
+			"Front": "from field flag",
+		},
+	}
+
+	err := runCardCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// --front/--back are applied after --field, so they win
+	if mock.addedNote.Fields["Front"] != "from front flag" {
+		t.Errorf("expected Front 'from front flag', got %q", mock.addedNote.Fields["Front"])
+	}
+	if mock.addedNote.Fields["Back"] != "from back flag" {
+		t.Errorf("expected Back 'from back flag', got %q", mock.addedNote.Fields["Back"])
 	}
 }

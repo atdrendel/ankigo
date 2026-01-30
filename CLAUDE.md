@@ -235,6 +235,53 @@ mock := &mockClient{
 
 This catches nil pointer issues and ensures the code handles incomplete API responses gracefully. Real-world APIs may return mismatched data due to timing, permissions, or data inconsistencies.
 
+### Integration Tests
+
+Integration tests live in `integration/` and run against a real Anki instance with anki-connect.
+
+**When to update integration tests:**
+
+- After completing a new feature, add tests covering the feature's happy path and key error cases
+- After changing the behavior of an existing feature, update tests to reflect the new behavior
+- After fixing a bug, consider adding a test that would have caught it
+
+**CRITICAL SAFETY RULES:**
+
+The integration tests run against the user's actual, production Anki database. You MUST follow these rules:
+
+1. **NEVER read existing user data** — Don't search, list, or inspect decks/cards that weren't created by the test
+2. **NEVER modify existing user data** — Don't update, move, or tag existing decks/cards
+3. **NEVER delete existing user data** — Only delete decks/cards created by the test itself
+
+**How safety is enforced:**
+
+All test data uses a unique prefix: `ANKIGO_TEST_<timestamp>_<pid>`
+
+```bash
+TEST_PREFIX="ANKIGO_TEST_$(date +%s)_$$"
+
+# GOOD: Create test deck with prefix
+./ankigo deck create "${TEST_PREFIX}_MyTestDeck"
+
+# GOOD: Search only in test deck
+./ankigo card search "deck:${TEST_PREFIX}_MyTestDeck"
+
+# GOOD: Delete only test decks
+./ankigo deck delete "${TEST_PREFIX}_MyTestDeck" --force
+
+# BAD: Never do these!
+./ankigo deck list                    # Lists user's real decks
+./ankigo card search "deck:Default"   # Searches user's real cards
+./ankigo deck delete "Default"        # CATASTROPHIC: Deletes user data!
+```
+
+**Running integration tests:**
+
+```bash
+# Requires Anki running with anki-connect
+./integration/run.sh
+```
+
 ## anki-connect Integration
 
 ### Client Interface
@@ -270,6 +317,11 @@ ankigo/
 │   ├── deck_test.go
 │   ├── card.go
 │   └── card_test.go
+├── integration/              # Integration tests (run against real Anki)
+│   ├── run.sh                # Main test runner
+│   ├── lib/
+│   │   └── helpers.sh        # Test utilities
+│   └── README.md
 ├── internal/
 │   └── ankiconnect/          # anki-connect client
 │       ├── client.go
@@ -286,3 +338,4 @@ ankigo/
 - [ ] Has unit tests with mock client
 - [ ] Destructive actions require confirmation (unless `--force`)
 - [ ] **Simulate the full user experience**: mentally run the command and read the complete output — check for redundant messages, unclear feedback, or missing information
+- [ ] **Integration tests added** in `integration/run.sh` (using `$TEST_PREFIX` for all test data)
