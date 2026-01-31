@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/atdrendel/ankigo/internal/ankiconnect"
@@ -20,6 +21,69 @@ type cardCreateOptions struct {
 	tags           []string
 	allowDuplicate bool
 	duplicateScope string
+	audio          []string
+	video          []string
+	picture        []string
+}
+
+// parseMediaSpec parses a media specification string into a MediaAttachment.
+// Format: filename=<name>,<source>,fields=<f1>;<f2>
+// Source is one of: path=/path, url=https://..., data=base64...
+func parseMediaSpec(spec string) (ankiconnect.MediaAttachment, error) {
+	var media ankiconnect.MediaAttachment
+
+	if spec == "" {
+		return media, fmt.Errorf("media specification cannot be empty")
+	}
+
+	// Parse key=value pairs separated by commas
+	// Handle the case where values might contain = (like URLs)
+	parts := strings.Split(spec, ",")
+	for _, part := range parts {
+		idx := strings.Index(part, "=")
+		if idx == -1 {
+			return media, fmt.Errorf("invalid media specification: expected key=value pairs, got %q", part)
+		}
+		key := part[:idx]
+		value := part[idx+1:]
+
+		switch key {
+		case "filename":
+			media.Filename = value
+		case "path":
+			media.Path = value
+		case "url":
+			media.URL = value
+		case "data":
+			media.Data = value
+		case "fields":
+			media.Fields = strings.Split(value, ";")
+		default:
+			return media, fmt.Errorf("unknown media specification key: %q", key)
+		}
+	}
+
+	// Validate required fields
+	if media.Filename == "" {
+		return media, fmt.Errorf("media specification missing required 'filename'")
+	}
+	if media.Path == "" && media.URL == "" && media.Data == "" {
+		return media, fmt.Errorf("media specification missing source: must specify 'path', 'url', or 'data'")
+	}
+	if len(media.Fields) == 0 {
+		return media, fmt.Errorf("media specification missing required 'fields'")
+	}
+
+	// Convert relative paths to absolute paths (anki-connect requires absolute paths)
+	if media.Path != "" && !filepath.IsAbs(media.Path) {
+		absPath, err := filepath.Abs(media.Path)
+		if err != nil {
+			return media, fmt.Errorf("failed to resolve path %q: %w", media.Path, err)
+		}
+		media.Path = absPath
+	}
+
+	return media, nil
 }
 
 // cardSearchFields are the available fields for card search output.
@@ -77,7 +141,18 @@ The --front and --back flags are shortcuts that set "Front" and "Back" fields.`,
   ankigo card create --model "Cloze" --field "Text=The capital of {{c1::France}} is {{c2::Paris}}"
 
   # Allow duplicate
-  ankigo card create --front "repeat" --back "answer" --allow-duplicate`,
+  ankigo card create --front "repeat" --back "answer" --allow-duplicate
+
+  # Card with audio from local file
+  ankigo card create --front "猫" --back "cat" --audio "filename=neko.mp3,path=./neko.mp3,fields=Front"
+
+  # Card with image from URL
+  ankigo card create --front "Q" --back "A" --picture "filename=img.jpg,url=https://example.com/img.jpg,fields=Front"
+
+  # Card with multiple media attachments
+  ankigo card create --front "Q" --back "A" \
+    --audio "filename=a.mp3,path=./a.mp3,fields=Back" \
+    --picture "filename=i.png,path=./i.png,fields=Front"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := ankiconnect.DefaultClient()
 
@@ -89,6 +164,9 @@ The --front and --back flags are shortcuts that set "Front" and "Back" fields.`,
 		tagsFlag, _ := cmd.Flags().GetStringSlice("tags")
 		allowDup, _ := cmd.Flags().GetBool("allow-duplicate")
 		dupScope, _ := cmd.Flags().GetString("duplicate-scope")
+		audioFlags, _ := cmd.Flags().GetStringArray("audio")
+		videoFlags, _ := cmd.Flags().GetStringArray("video")
+		pictureFlags, _ := cmd.Flags().GetStringArray("picture")
 
 		// Parse --field flags into map
 		fields := make(map[string]string)
@@ -109,6 +187,9 @@ The --front and --back flags are shortcuts that set "Front" and "Back" fields.`,
 			tags:           tagsFlag,
 			allowDuplicate: allowDup,
 			duplicateScope: dupScope,
+			audio:          audioFlags,
+			video:          videoFlags,
+			picture:        pictureFlags,
 		}
 
 		return runCardCreate(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
@@ -167,8 +248,9 @@ func runCardCreate(client Client, stdout, stderr io.Writer, opts cardCreateOptio
 
 	// Validate field names (warn, don't fail)
 	modelFields, err := client.ModelFieldNames(opts.model)
+	var modelFieldSet map[string]bool
 	if err == nil {
-		modelFieldSet := make(map[string]bool)
+		modelFieldSet = make(map[string]bool)
 		for _, f := range modelFields {
 			modelFieldSet[f] = true
 		}
@@ -180,12 +262,68 @@ func runCardCreate(client Client, stdout, stderr io.Writer, opts cardCreateOptio
 		}
 	}
 
+	// Parse media attachments
+	var audioAttachments []ankiconnect.MediaAttachment
+	for _, spec := range opts.audio {
+		media, err := parseMediaSpec(spec)
+		if err != nil {
+			return fmt.Errorf("invalid audio specification: %w", err)
+		}
+		// Warn if media field not in model
+		if modelFieldSet != nil {
+			for _, f := range media.Fields {
+				if !modelFieldSet[f] {
+					fmt.Fprintf(stderr, "warning: audio field %q is not in model %q (available: %s)\n",
+						f, opts.model, strings.Join(modelFields, ", "))
+				}
+			}
+		}
+		audioAttachments = append(audioAttachments, media)
+	}
+
+	var videoAttachments []ankiconnect.MediaAttachment
+	for _, spec := range opts.video {
+		media, err := parseMediaSpec(spec)
+		if err != nil {
+			return fmt.Errorf("invalid video specification: %w", err)
+		}
+		if modelFieldSet != nil {
+			for _, f := range media.Fields {
+				if !modelFieldSet[f] {
+					fmt.Fprintf(stderr, "warning: video field %q is not in model %q (available: %s)\n",
+						f, opts.model, strings.Join(modelFields, ", "))
+				}
+			}
+		}
+		videoAttachments = append(videoAttachments, media)
+	}
+
+	var pictureAttachments []ankiconnect.MediaAttachment
+	for _, spec := range opts.picture {
+		media, err := parseMediaSpec(spec)
+		if err != nil {
+			return fmt.Errorf("invalid picture specification: %w", err)
+		}
+		if modelFieldSet != nil {
+			for _, f := range media.Fields {
+				if !modelFieldSet[f] {
+					fmt.Fprintf(stderr, "warning: picture field %q is not in model %q (available: %s)\n",
+						f, opts.model, strings.Join(modelFields, ", "))
+				}
+			}
+		}
+		pictureAttachments = append(pictureAttachments, media)
+	}
+
 	// Build the note
 	note := ankiconnect.Note{
 		DeckName:  opts.deck,
 		ModelName: opts.model,
 		Fields:    fields,
 		Tags:      opts.tags,
+		Audio:     audioAttachments,
+		Video:     videoAttachments,
+		Picture:   pictureAttachments,
 	}
 
 	// Add duplicate options if specified
@@ -602,6 +740,9 @@ func init() {
 	cardCreateCmd.Flags().StringSlice("tags", nil, "tags for the card (comma-separated or repeatable)")
 	cardCreateCmd.Flags().Bool("allow-duplicate", false, "allow adding duplicate cards")
 	cardCreateCmd.Flags().String("duplicate-scope", "", `scope for duplicate check: "deck" or empty for collection-wide`)
+	cardCreateCmd.Flags().StringArray("audio", nil, `attach audio (format: "filename=name.mp3,path=/file.mp3,fields=Back")`)
+	cardCreateCmd.Flags().StringArray("video", nil, `attach video (format: "filename=name.mp4,url=https://...,fields=Back")`)
+	cardCreateCmd.Flags().StringArray("picture", nil, `attach picture (format: "filename=name.jpg,path=/file.jpg,fields=Front")`)
 
 	cardSearchCmd.Flags().Bool("json", false, "Output in JSON format")
 	cardSearchCmd.Flags().StringP("fields", "f", "", "Comma-separated list of fields (available: id, note, deck, model, ord, question, answer, fields, type, queue, due, interval, factor, reps, lapses, left, mod, fieldOrder, css)")

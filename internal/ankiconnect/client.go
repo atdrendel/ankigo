@@ -31,6 +31,9 @@ type Note struct {
 	Fields    map[string]string `json:"fields"`
 	Tags      []string          `json:"tags,omitempty"`
 	Options   *NoteOptions      `json:"options,omitempty"`
+	Audio     []MediaAttachment `json:"audio,omitempty"`
+	Video     []MediaAttachment `json:"video,omitempty"`
+	Picture   []MediaAttachment `json:"picture,omitempty"`
 }
 
 // NoteOptions contains options for duplicate handling.
@@ -45,6 +48,17 @@ type DuplicateScopeOptions struct {
 	DeckName       string `json:"deckName,omitempty"`
 	CheckChildren  bool   `json:"checkChildren,omitempty"`
 	CheckAllModels bool   `json:"checkAllModels,omitempty"`
+}
+
+// MediaAttachment represents a media file to attach to a note.
+type MediaAttachment struct {
+	Filename       string   `json:"filename"`
+	URL            string   `json:"url,omitempty"`
+	Path           string   `json:"path,omitempty"`
+	Data           string   `json:"data,omitempty"`
+	SkipHash       string   `json:"skipHash,omitempty"`
+	DeleteExisting *bool    `json:"deleteExisting,omitempty"`
+	Fields         []string `json:"fields,omitempty"`
 }
 
 // CardInfo contains detailed information about a card.

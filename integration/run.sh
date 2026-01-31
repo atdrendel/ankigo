@@ -182,6 +182,80 @@ test_card_create_cloze() {
             -m "Cloze" --field "Text=The {{c1::capital}} of France is {{c2::Paris}}"
 }
 
+test_card_create_media() {
+    local deck_name="${TEST_PREFIX}_MediaTest"
+    ./ankigo deck create "$deck_name" >/dev/null
+
+    # Use RELATIVE paths to test that ankigo converts them to absolute paths
+    # (anki-connect requires absolute paths, so ankigo must handle this)
+    local test_audio="integration/testdata/test.mp3"
+    local test_image="integration/testdata/test.png"
+    local test_video="integration/testdata/test.mp4"
+
+    # Test: Card with audio from relative path
+    run_test "card create with audio (relative path)" \
+        assert_success ./ankigo card create -d "$deck_name" \
+            -f "Audio Q" -b "Audio A" \
+            --audio "filename=${TEST_PREFIX}_audio.mp3,path=$test_audio,fields=Back"
+
+    # Test: Card with picture from relative path
+    run_test "card create with picture (relative path)" \
+        assert_success ./ankigo card create -d "$deck_name" \
+            -f "Picture Q" -b "Picture A" \
+            --picture "filename=${TEST_PREFIX}_image.png,path=$test_image,fields=Front"
+
+    # Test: Card with video from relative path
+    run_test "card create with video (relative path)" \
+        assert_success ./ankigo card create -d "$deck_name" \
+            -f "Video Q" -b "Video A" \
+            --video "filename=${TEST_PREFIX}_video.mp4,path=$test_video,fields=Back"
+
+    # Test: Card with multiple media types
+    run_test "card create with multiple media" \
+        assert_success ./ankigo card create -d "$deck_name" \
+            -f "Multi Q" -b "Multi A" \
+            --audio "filename=${TEST_PREFIX}_a2.mp3,path=$test_audio,fields=Back" \
+            --picture "filename=${TEST_PREFIX}_i2.png,path=$test_image,fields=Front"
+
+    # Test: Card with media attached to multiple fields
+    run_test "card create with media on multiple fields" \
+        assert_success ./ankigo card create -d "$deck_name" \
+            -f "Both Q" -b "Both A" \
+            --picture "filename=${TEST_PREFIX}_both.png,path=$test_image,fields=Front;Back"
+
+    # Test: Card with absolute path (should also work)
+    local abs_audio="$SCRIPT_DIR/testdata/test.mp3"
+    run_test "card create with audio (absolute path)" \
+        assert_success ./ankigo card create -d "$deck_name" \
+            -f "Abs Audio Q" -b "Abs Audio A" \
+            --audio "filename=${TEST_PREFIX}_abs_audio.mp3,path=$abs_audio,fields=Back"
+}
+
+test_card_create_media_errors() {
+    local deck_name="${TEST_PREFIX}_MediaErrorTest"
+    ./ankigo deck create "$deck_name" >/dev/null
+
+    # Test: Missing filename
+    run_test "card create media missing filename fails" \
+        assert_failure ./ankigo card create -d "$deck_name" \
+            -f "Q" -b "A" --audio "path=/tmp/test.mp3,fields=Back"
+
+    # Test: Missing source (no path/url/data)
+    run_test "card create media missing source fails" \
+        assert_failure ./ankigo card create -d "$deck_name" \
+            -f "Q" -b "A" --audio "filename=test.mp3,fields=Back"
+
+    # Test: Missing fields
+    run_test "card create media missing fields fails" \
+        assert_failure ./ankigo card create -d "$deck_name" \
+            -f "Q" -b "A" --audio "filename=test.mp3,path=/tmp/test.mp3"
+
+    # Test: Invalid spec format
+    run_test "card create media invalid format fails" \
+        assert_failure ./ankigo card create -d "$deck_name" \
+            -f "Q" -b "A" --audio "invalid"
+}
+
 test_card_search() {
     local deck_name="${TEST_PREFIX}_SearchTest"
     ./ankigo deck create "$deck_name" >/dev/null
@@ -321,6 +395,14 @@ test_card_create_duplicates
 echo ""
 echo "[Card Create - Cloze]"
 test_card_create_cloze
+
+echo ""
+echo "[Card Create - Media]"
+test_card_create_media
+
+echo ""
+echo "[Card Create - Media Errors]"
+test_card_create_media_errors
 
 echo ""
 echo "[Card Search]"
