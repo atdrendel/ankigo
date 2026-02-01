@@ -31,7 +31,7 @@ type mockClient struct {
 	cardsInfoErr error
 	searchQuery  string // captures query passed to FindCards
 
-	// Card add fields
+	// Note add fields
 	addedNote       *ankiconnect.Note // captures note passed to AddNote
 	addNoteID       int64
 	addNoteErr      error
@@ -39,6 +39,10 @@ type mockClient struct {
 	modelNamesErr   error
 	modelFieldNames map[string][]string // model name -> field names
 	modelFieldsErr  error
+
+	// Note delete fields
+	deletedNotes   []int64 // captures IDs passed to DeleteNotes
+	deleteNotesErr error
 }
 
 func (m *mockClient) DeckNames() ([]string, error) {
@@ -93,6 +97,11 @@ func (m *mockClient) ModelFieldNames(modelName string) ([]string, error) {
 		return nil, fmt.Errorf("model was not found: %s", modelName)
 	}
 	return fields, nil
+}
+
+func (m *mockClient) DeleteNotes(notes []int64) error {
+	m.deletedNotes = notes
+	return m.deleteNotesErr
 }
 
 func TestDeckList_PlainText_Default(t *testing.T) {

@@ -62,6 +62,8 @@ test_version_help() {
     run_test "deck --help succeeds" assert_success ./ankigo deck --help
 
     run_test "card --help succeeds" assert_success ./ankigo card --help
+
+    run_test "note --help succeeds" assert_success ./ankigo note --help
 }
 
 test_deck_list() {
@@ -105,84 +107,84 @@ test_deck_create() {
     run_test "create unicode deck" assert_success ./ankigo deck create "$unicode_deck"
 }
 
-test_card_create_basic() {
-    local deck_name="${TEST_PREFIX}_CardTest"
+test_note_create_basic() {
+    local deck_name="${TEST_PREFIX}_NoteTest"
     ./ankigo deck create "$deck_name" >/dev/null
 
     local note_id
-    note_id=$(./ankigo card create -d "$deck_name" -f "Test front" -b "Test back")
-    run_test "card create returns numeric ID" assert_numeric "$note_id"
+    note_id=$(./ankigo note create -d "$deck_name" -f "Test front" -b "Test back")
+    run_test "note create returns numeric ID" assert_numeric "$note_id"
 
-    # Verify card appears in search
+    # Verify card appears in search (notes create cards)
     local search_result
     search_result=$(./ankigo card search "deck:$deck_name")
-    run_test "created card appears in search" assert_not_empty "$search_result"
+    run_test "created note's card appears in search" assert_not_empty "$search_result"
 
-    # Card with tags
-    run_test "card create with tags" \
-        assert_success ./ankigo card create -d "$deck_name" \
+    # Note with tags
+    run_test "note create with tags" \
+        assert_success ./ankigo note create -d "$deck_name" \
             -f "Tagged Q" -b "Tagged A" --tags "${TEST_PREFIX}_tag1,${TEST_PREFIX}_tag2"
 
     # Unicode content
-    run_test "card create with unicode" \
-        assert_success ./ankigo card create -d "$deck_name" \
+    run_test "note create with unicode" \
+        assert_success ./ankigo note create -d "$deck_name" \
             -f "日本とは何ですか？" -b "Japan"
 }
 
-test_card_create_validation() {
+test_note_create_validation() {
     local deck_name="${TEST_PREFIX}_ValidationTest"
     ./ankigo deck create "$deck_name" >/dev/null
 
-    run_test "card create missing --front fails" \
-        assert_failure ./ankigo card create -d "$deck_name" -b "back only"
+    run_test "note create missing --front fails" \
+        assert_failure ./ankigo note create -d "$deck_name" -b "back only"
 
-    run_test "card create missing --back fails" \
-        assert_failure ./ankigo card create -d "$deck_name" -f "front only"
+    run_test "note create missing --back fails" \
+        assert_failure ./ankigo note create -d "$deck_name" -f "front only"
 
-    run_test "card create non-existent deck fails" \
-        assert_failure ./ankigo card create -d "NONEXISTENT_DECK_${RANDOM}" \
+    run_test "note create non-existent deck fails" \
+        assert_failure ./ankigo note create -d "NONEXISTENT_DECK_${RANDOM}" \
             -f "Q" -b "A"
 
-    run_test "card create non-existent model fails" \
-        assert_failure ./ankigo card create -d "$deck_name" \
+    run_test "note create non-existent model fails" \
+        assert_failure ./ankigo note create -d "$deck_name" \
             -m "NONEXISTENT_MODEL_${RANDOM}" --field "Text=test"
 }
 
-test_card_create_duplicates() {
+test_note_create_duplicates() {
     local deck_name="${TEST_PREFIX}_DuplicateTest"
     local deck_name2="${TEST_PREFIX}_DuplicateTest2"
     ./ankigo deck create "$deck_name" >/dev/null
     ./ankigo deck create "$deck_name2" >/dev/null
 
-    # Create original card
-    ./ankigo card create -d "$deck_name" -f "Duplicate Q ${TEST_PREFIX}" -b "Duplicate A" >/dev/null
+    # Create original note
+    ./ankigo note create -d "$deck_name" -f "Duplicate Q ${TEST_PREFIX}" -b "Duplicate A" >/dev/null
 
     # Duplicate should fail
-    run_test "duplicate card fails" \
-        assert_failure ./ankigo card create -d "$deck_name" \
+    run_test "duplicate note fails" \
+        assert_failure ./ankigo note create -d "$deck_name" \
             -f "Duplicate Q ${TEST_PREFIX}" -b "Duplicate A"
 
     # Duplicate with --allow-duplicate succeeds
     run_test "duplicate with --allow-duplicate succeeds" \
-        assert_success ./ankigo card create -d "$deck_name" \
+        assert_success ./ankigo note create -d "$deck_name" \
             -f "Duplicate Q ${TEST_PREFIX}" -b "Duplicate A" --allow-duplicate
 
     # Duplicate in different deck with --duplicate-scope deck succeeds
     run_test "duplicate in different deck with scope succeeds" \
-        assert_success ./ankigo card create -d "$deck_name2" \
+        assert_success ./ankigo note create -d "$deck_name2" \
             -f "Duplicate Q ${TEST_PREFIX}" -b "Duplicate A" --duplicate-scope deck
 }
 
-test_card_create_cloze() {
+test_note_create_cloze() {
     local deck_name="${TEST_PREFIX}_ClozeTest"
     ./ankigo deck create "$deck_name" >/dev/null
 
-    run_test "cloze card create" \
-        assert_success ./ankigo card create -d "$deck_name" \
+    run_test "cloze note create" \
+        assert_success ./ankigo note create -d "$deck_name" \
             -m "Cloze" --field "Text=The {{c1::capital}} of France is {{c2::Paris}}"
 }
 
-test_card_create_media() {
+test_note_create_media() {
     local deck_name="${TEST_PREFIX}_MediaTest"
     ./ankigo deck create "$deck_name" >/dev/null
 
@@ -192,74 +194,140 @@ test_card_create_media() {
     local test_image="integration/testdata/test.png"
     local test_video="integration/testdata/test.mp4"
 
-    # Test: Card with audio from relative path
-    run_test "card create with audio (relative path)" \
-        assert_success ./ankigo card create -d "$deck_name" \
+    # Test: Note with audio from relative path
+    run_test "note create with audio (relative path)" \
+        assert_success ./ankigo note create -d "$deck_name" \
             -f "Audio Q" -b "Audio A" \
             --audio "filename=${TEST_PREFIX}_audio.mp3,path=$test_audio,fields=Back"
 
-    # Test: Card with picture from relative path
-    run_test "card create with picture (relative path)" \
-        assert_success ./ankigo card create -d "$deck_name" \
+    # Test: Note with picture from relative path
+    run_test "note create with picture (relative path)" \
+        assert_success ./ankigo note create -d "$deck_name" \
             -f "Picture Q" -b "Picture A" \
             --picture "filename=${TEST_PREFIX}_image.png,path=$test_image,fields=Front"
 
-    # Test: Card with video from relative path
-    run_test "card create with video (relative path)" \
-        assert_success ./ankigo card create -d "$deck_name" \
+    # Test: Note with video from relative path
+    run_test "note create with video (relative path)" \
+        assert_success ./ankigo note create -d "$deck_name" \
             -f "Video Q" -b "Video A" \
             --video "filename=${TEST_PREFIX}_video.mp4,path=$test_video,fields=Back"
 
-    # Test: Card with multiple media types
-    run_test "card create with multiple media" \
-        assert_success ./ankigo card create -d "$deck_name" \
+    # Test: Note with multiple media types
+    run_test "note create with multiple media" \
+        assert_success ./ankigo note create -d "$deck_name" \
             -f "Multi Q" -b "Multi A" \
             --audio "filename=${TEST_PREFIX}_a2.mp3,path=$test_audio,fields=Back" \
             --picture "filename=${TEST_PREFIX}_i2.png,path=$test_image,fields=Front"
 
-    # Test: Card with media attached to multiple fields
-    run_test "card create with media on multiple fields" \
-        assert_success ./ankigo card create -d "$deck_name" \
+    # Test: Note with media attached to multiple fields
+    run_test "note create with media on multiple fields" \
+        assert_success ./ankigo note create -d "$deck_name" \
             -f "Both Q" -b "Both A" \
             --picture "filename=${TEST_PREFIX}_both.png,path=$test_image,fields=Front;Back"
 
-    # Test: Card with absolute path (should also work)
+    # Test: Note with absolute path (should also work)
     local abs_audio="$SCRIPT_DIR/testdata/test.mp3"
-    run_test "card create with audio (absolute path)" \
-        assert_success ./ankigo card create -d "$deck_name" \
+    run_test "note create with audio (absolute path)" \
+        assert_success ./ankigo note create -d "$deck_name" \
             -f "Abs Audio Q" -b "Abs Audio A" \
             --audio "filename=${TEST_PREFIX}_abs_audio.mp3,path=$abs_audio,fields=Back"
 }
 
-test_card_create_media_errors() {
+test_note_create_media_errors() {
     local deck_name="${TEST_PREFIX}_MediaErrorTest"
     ./ankigo deck create "$deck_name" >/dev/null
 
     # Test: Missing filename
-    run_test "card create media missing filename fails" \
-        assert_failure ./ankigo card create -d "$deck_name" \
+    run_test "note create media missing filename fails" \
+        assert_failure ./ankigo note create -d "$deck_name" \
             -f "Q" -b "A" --audio "path=/tmp/test.mp3,fields=Back"
 
     # Test: Missing source (no path/url/data)
-    run_test "card create media missing source fails" \
-        assert_failure ./ankigo card create -d "$deck_name" \
+    run_test "note create media missing source fails" \
+        assert_failure ./ankigo note create -d "$deck_name" \
             -f "Q" -b "A" --audio "filename=test.mp3,fields=Back"
 
     # Test: Missing fields
-    run_test "card create media missing fields fails" \
-        assert_failure ./ankigo card create -d "$deck_name" \
+    run_test "note create media missing fields fails" \
+        assert_failure ./ankigo note create -d "$deck_name" \
             -f "Q" -b "A" --audio "filename=test.mp3,path=/tmp/test.mp3"
 
     # Test: Invalid spec format
-    run_test "card create media invalid format fails" \
-        assert_failure ./ankigo card create -d "$deck_name" \
+    run_test "note create media invalid format fails" \
+        assert_failure ./ankigo note create -d "$deck_name" \
             -f "Q" -b "A" --audio "invalid"
+}
+
+test_note_delete() {
+    local deck_name="${TEST_PREFIX}_NoteDeleteTest"
+    ./ankigo deck create "$deck_name" >/dev/null
+
+    # Create a note to delete
+    local note_id
+    note_id=$(./ankigo note create -d "$deck_name" -f "Delete me" -b "Answer")
+    run_test "note create returns numeric ID" assert_numeric "$note_id"
+
+    # Verify note exists via card search
+    local search_before
+    search_before=$(./ankigo card search "deck:$deck_name")
+    run_test "created note has cards" assert_not_empty "$search_before"
+
+    # Delete the note
+    run_test "note delete succeeds" \
+        assert_success ./ankigo note delete "$note_id" --force
+
+    # Verify note is gone (no cards found)
+    local search_after
+    search_after=$(./ankigo card search "deck:$deck_name" 2>/dev/null || true)
+    run_test "deleted note has no cards" \
+        test "$search_after" = "No cards found" -o -z "$search_after"
+}
+
+test_note_delete_dryrun() {
+    local deck_name="${TEST_PREFIX}_NoteDeleteDryRun"
+    ./ankigo deck create "$deck_name" >/dev/null
+
+    local note_id
+    note_id=$(./ankigo note create -d "$deck_name" -f "Dry run Q" -b "Dry run A")
+
+    # Dry run should NOT delete
+    ./ankigo note delete "$note_id" --dry-run >/dev/null 2>&1 || true
+
+    # Verify note still exists
+    local search_result
+    search_result=$(./ankigo card search "deck:$deck_name")
+    run_test "note delete --dry-run doesn't delete" assert_not_empty "$search_result"
+}
+
+test_note_delete_multiple() {
+    local deck_name="${TEST_PREFIX}_NoteDeleteMultiple"
+    ./ankigo deck create "$deck_name" >/dev/null
+
+    local note1 note2
+    note1=$(./ankigo note create -d "$deck_name" -f "Q1" -b "A1")
+    note2=$(./ankigo note create -d "$deck_name" -f "Q2" -b "A2")
+
+    run_test "note delete multiple succeeds" \
+        assert_success ./ankigo note delete "$note1" "$note2" --force
+
+    local search_result
+    search_result=$(./ankigo card search "deck:$deck_name" 2>/dev/null || true)
+    run_test "all notes deleted" \
+        test "$search_result" = "No cards found" -o -z "$search_result"
+}
+
+test_note_delete_validation() {
+    run_test "note delete no args fails" \
+        assert_failure ./ankigo note delete
+
+    run_test "note delete invalid ID fails" \
+        assert_failure ./ankigo note delete "not-a-number"
 }
 
 test_card_search() {
     local deck_name="${TEST_PREFIX}_SearchTest"
     ./ankigo deck create "$deck_name" >/dev/null
-    ./ankigo card create -d "$deck_name" -f "Search Q" -b "Search A" \
+    ./ankigo note create -d "$deck_name" -f "Search Q" -b "Search A" \
         --tags "${TEST_PREFIX}_searchtag" >/dev/null
 
     run_test "card search by deck" \
@@ -381,28 +449,44 @@ echo "[Deck Create]"
 test_deck_create
 
 echo ""
-echo "[Card Create - Basic]"
-test_card_create_basic
+echo "[Note Create - Basic]"
+test_note_create_basic
 
 echo ""
-echo "[Card Create - Validation]"
-test_card_create_validation
+echo "[Note Create - Validation]"
+test_note_create_validation
 
 echo ""
-echo "[Card Create - Duplicates]"
-test_card_create_duplicates
+echo "[Note Create - Duplicates]"
+test_note_create_duplicates
 
 echo ""
-echo "[Card Create - Cloze]"
-test_card_create_cloze
+echo "[Note Create - Cloze]"
+test_note_create_cloze
 
 echo ""
-echo "[Card Create - Media]"
-test_card_create_media
+echo "[Note Create - Media]"
+test_note_create_media
 
 echo ""
-echo "[Card Create - Media Errors]"
-test_card_create_media_errors
+echo "[Note Create - Media Errors]"
+test_note_create_media_errors
+
+echo ""
+echo "[Note Delete]"
+test_note_delete
+
+echo ""
+echo "[Note Delete - Dry Run]"
+test_note_delete_dryrun
+
+echo ""
+echo "[Note Delete - Multiple]"
+test_note_delete_multiple
+
+echo ""
+echo "[Note Delete - Validation]"
+test_note_delete_validation
 
 echo ""
 echo "[Card Search]"

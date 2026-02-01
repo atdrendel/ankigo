@@ -24,6 +24,7 @@ type Client interface {
 	FindCards(query string) ([]int64, error)
 	CardsInfo(cardIDs []int64) ([]ankiconnect.CardInfo, error)
 	AddNote(note ankiconnect.Note) (int64, error)
+	DeleteNotes(notes []int64) error
 	ModelNames() ([]string, error)
 	ModelFieldNames(modelName string) ([]string, error)
 }
@@ -331,12 +332,14 @@ func runDeckCreate(client Client, out io.Writer, name string) error {
 }
 
 var deckDeleteCmd = &cobra.Command{
-	Use:          "delete [deck-names...]",
-	Short:        "Delete one or more decks",
-	Long:         `Delete one or more decks and all their cards. Requires --force flag or confirmation.`,
-	Args:         cobra.MinimumNArgs(1),
-	SilenceUsage: true,
+	Use:   "delete [deck-names...]",
+	Short: "Delete one or more decks",
+	Long:  `Delete one or more decks and all their cards. Requires --force flag or confirmation.`,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Silence usage for errors that happen during execution (not arg validation)
+		cmd.SilenceUsage = true
+
 		client := ankiconnect.DefaultClient()
 		force, _ := cmd.Flags().GetBool("force")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")

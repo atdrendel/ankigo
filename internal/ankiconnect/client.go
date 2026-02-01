@@ -498,3 +498,34 @@ func (c *HTTPClient) ModelFieldNames(modelName string) ([]string, error) {
 
 	return fields, nil
 }
+
+// DeleteNotes deletes notes by their IDs.
+func (c *HTTPClient) DeleteNotes(notes []int64) error {
+	req := request{
+		Action:  "deleteNotes",
+		Version: 6,
+		Params:  map[string]interface{}{"notes": notes},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return err
+	}
+
+	if apiResp.Error != nil {
+		return errors.New(*apiResp.Error)
+	}
+
+	return nil
+}
