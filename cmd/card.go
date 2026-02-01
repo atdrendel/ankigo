@@ -48,7 +48,8 @@ var cardSearchCmd = &cobra.Command{
   ankigo card search "tag:japanese"
   ankigo card search "is:new"
   ankigo card search "is:due"
-  ankigo card search "front:hello"`,
+  ankigo card search "front:hello"
+  ankigo card search "deck:\"My Spanish Deck\""`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := ankiconnect.DefaultClient()

@@ -128,6 +128,30 @@ if len(notFound) > 0 {
 
 Before adding new error handling, check `cmd/errors.go` for existing patterns.
 
+### Silence Usage on Runtime Errors
+
+Cobra's default behavior is to print usage/help when `RunE` returns an error. This is appropriate for argument validation errors (wrong number of args, invalid flags), but NOT for runtime errors (API failures, user cancellations).
+
+For commands that can fail during execution, add `cmd.SilenceUsage = true` at the start of `RunE`:
+
+```go
+var myDeleteCmd = &cobra.Command{
+    Use: "delete [name]",
+    RunE: func(cmd *cobra.Command, args []string) error {
+        // Silence usage for errors that happen during execution (not arg validation)
+        cmd.SilenceUsage = true
+
+        // ... rest of implementation
+        // Now if user declines confirmation or API fails, usage won't be printed
+    },
+}
+```
+
+**When to use:**
+- Commands with confirmation prompts (returns `ErrCancelled`)
+- Commands that make API calls (can fail at runtime)
+- Any command where errors occur AFTER argument validation
+
 ### Exit Codes
 
 | Code | Meaning |
@@ -337,5 +361,31 @@ ankigo/
 - [ ] Works in pipes (non-TTY mode)
 - [ ] Has unit tests with mock client
 - [ ] Destructive actions require confirmation (unless `--force`)
+- [ ] **`cmd.SilenceUsage = true`** in `RunE` for commands that can fail at runtime (API calls, confirmations)
 - [ ] **Simulate the full user experience**: mentally run the command and read the complete output — check for redundant messages, unclear feedback, or missing information
 - [ ] **Integration tests added** in `integration/run.sh` (using `$TEST_PREFIX` for all test data)
+- [ ] **Help text examples** include multi-word query syntax (for commands accepting queries)
+
+## Help Text Examples
+
+When a command accepts an Anki-style query string, include examples in the `Example` field showing:
+
+1. **Basic single-word queries** (deck:Default, tag:japanese, is:new)
+2. **Multi-word queries with escaped quotes** — Users must escape quotes within the query string
+
+### Multi-Word Query Syntax
+
+Anki queries with spaces require inner quotes. On the command line, escape them:
+
+```bash
+# Deck name with spaces
+ankigo card search "deck:\"My Spanish Deck\""
+
+# Note type with spaces and parentheses
+ankigo note list "note:\"Basic (and reversed card)\""
+
+# Tag with spaces
+ankigo card search "tag:\"to review\""
+```
+
+Include at least one multi-word example for any command that accepts queries.

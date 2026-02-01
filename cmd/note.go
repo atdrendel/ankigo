@@ -437,7 +437,8 @@ var noteListCmd = &cobra.Command{
   ankigo note list "deck:Default"
   ankigo note list "tag:japanese"
   ankigo note list "note:Cloze"
-  ankigo note list "edited:1"`,
+  ankigo note list "edited:1"
+  ankigo note list "note:\"Basic (and reversed card)\""`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := ankiconnect.DefaultClient()

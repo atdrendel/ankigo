@@ -28,7 +28,10 @@ type Client interface {
 	AddNote(note ankiconnect.Note) (int64, error)
 	DeleteNotes(notes []int64) error
 	ModelNames() ([]string, error)
+	ModelNamesAndIds() (map[string]int64, error)
 	ModelFieldNames(modelName string) ([]string, error)
+	CreateModel(params ankiconnect.CreateModelParams) (map[string]interface{}, error)
+	RemoveEmptyNotes() error
 }
 
 // deckListFields are the available fields for deck list output.

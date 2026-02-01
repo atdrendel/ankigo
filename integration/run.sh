@@ -22,16 +22,31 @@ echo ""
 cleanup() {
     echo ""
     echo "[Cleanup]"
+
+    # Clean up test decks (this also deletes notes in those decks)
     local decks_to_delete
     decks_to_delete=$(./ankigo deck list 2>/dev/null | grep "^${TEST_PREFIX}" || true)
     if [[ -n "$decks_to_delete" ]]; then
         echo "$decks_to_delete" | while read -r deck; do
             ./ankigo deck delete "$deck" --force 2>/dev/null || true
-            echo "  Deleted: $deck"
+            echo "  Deleted deck: $deck"
         done
     else
         echo "  No test decks to clean up"
     fi
+
+    # Clean up test models (now empty after decks deleted)
+    local models_to_prune
+    models_to_prune=$(./ankigo model list 2>/dev/null | grep "^${TEST_PREFIX}" || true)
+    if [[ -n "$models_to_prune" ]]; then
+        echo "$models_to_prune" | while read -r model; do
+            ./ankigo model prune "$model" --force 2>/dev/null || true
+            echo "  Pruned model: $model"
+        done
+    else
+        echo "  No test models to clean up"
+    fi
+
     echo -e "${GREEN}✓${NC} cleanup complete"
 }
 trap cleanup EXIT
@@ -478,6 +493,157 @@ test_exit_codes() {
     run_test "exit code non-zero on unknown command" test "$exit_code" != "0"
 }
 
+test_model_list() {
+    # -------------------------------------------------------------------------
+    # READ-ONLY TESTS (built-in models)
+    # These tests verify functionality against Anki's built-in models.
+    # -------------------------------------------------------------------------
+
+    # Test that model list runs successfully
+    run_test "model list succeeds" assert_success ./ankigo model list
+
+    # Every Anki installation has Basic and Cloze models
+    local result
+    result=$(./ankigo model list)
+    run_test "model list includes Basic" assert_contains "$result" "Basic"
+    run_test "model list includes Cloze" assert_contains "$result" "Cloze"
+
+    # Test with fields flag
+    run_test "model list --fields name,id succeeds" \
+        assert_success ./ankigo model list --fields name,id
+
+    # Test with fields showing field names
+    local fields_output
+    fields_output=$(./ankigo model list --fields name,fields)
+    run_test "model list shows field names" assert_contains "$fields_output" "Front"
+
+    # Test JSON output
+    local json_output
+    json_output=$(./ankigo model list --json)
+    run_test "model list --json is valid JSON" assert_json_array "$json_output"
+
+    # Invalid field should fail
+    run_test "model list invalid field fails" \
+        assert_failure ./ankigo model list --fields invalid_field
+
+}
+
+test_model_create() {
+    local model_name="${TEST_PREFIX}_TestModel"
+
+    # Create basic model
+    run_test "model create basic succeeds" \
+        assert_success ./ankigo model create "$model_name" \
+            --field Front --field Back \
+            --template "Card 1,{{Front}},{{Back}}"
+
+    # Verify model appears in list
+    local model_list
+    model_list=$(./ankigo model list)
+    run_test "created model appears in list" assert_contains "$model_list" "$model_name"
+
+    # Verify fields
+    local fields_output
+    fields_output=$(./ankigo model list --fields name,fields | grep "$model_name")
+    run_test "model has correct fields" assert_contains "$fields_output" "Front,Back"
+
+    # Create cloze model
+    local cloze_name="${TEST_PREFIX}_ClozeModel"
+    run_test "create cloze model" assert_success \
+        ./ankigo model create "$cloze_name" \
+            --field Text --field Extra --cloze \
+            --template "Cloze,{{cloze:Text}},{{Text}}"
+
+    # Create model with multiple templates
+    local multi_name="${TEST_PREFIX}_MultiTemplate"
+    run_test "create model with multiple templates" assert_success \
+        ./ankigo model create "$multi_name" \
+            --field Front --field Back \
+            --template "Forward,{{Front}},{{Back}}" \
+            --template "Reverse,{{Back}},{{Front}}"
+
+    # Create model with CSS
+    local styled_name="${TEST_PREFIX}_StyledModel"
+    run_test "create model with CSS" assert_success \
+        ./ankigo model create "$styled_name" \
+            --field Q --field A \
+            --template "Card 1,{{Q}},{{A}}" \
+            --css ".card { font-size: 20px; }"
+
+    # Error: duplicate name
+    run_test "model create duplicate fails" assert_failure \
+        ./ankigo model create "$model_name" --field X --template "T,{{X}},{{X}}"
+
+    # Error: missing fields
+    run_test "model create missing fields fails" assert_failure \
+        ./ankigo model create "${TEST_PREFIX}_NoFields" --template "T,X,Y"
+
+    # Error: missing templates
+    run_test "model create missing templates fails" assert_failure \
+        ./ankigo model create "${TEST_PREFIX}_NoTemplates" --field X
+
+    # Error: invalid template format
+    run_test "model create invalid template fails" assert_failure \
+        ./ankigo model create "${TEST_PREFIX}_BadTemplate" --field X --template "invalid"
+}
+
+test_model_prune() {
+    # Create empty test models
+    local model1="${TEST_PREFIX}_PruneMe1"
+    local model2="${TEST_PREFIX}_PruneMe2"
+    ./ankigo model create "$model1" \
+        --field Front --field Back \
+        --template "Card 1,{{Front}},{{Back}}" >/dev/null
+    ./ankigo model create "$model2" \
+        --field Front --field Back \
+        --template "Card 1,{{Front}},{{Back}}" >/dev/null
+
+    # Dry run doesn't remove
+    ./ankigo model prune "$model1" --dry-run >/dev/null 2>&1
+    local list_after_dry
+    list_after_dry=$(./ankigo model list)
+    run_test "model prune --dry-run doesn't remove" assert_contains "$list_after_dry" "$model1"
+
+    # Prune specific empty model (with --force to skip confirmation)
+    run_test "model prune specific succeeds" assert_success \
+        ./ankigo model prune "$model1" --force
+
+    # Verify model is gone
+    local list_after_prune
+    list_after_prune=$(./ankigo model list)
+    run_test "pruned model not in list" assert_not_contains "$list_after_prune" "$model1"
+    run_test "other model still exists" assert_contains "$list_after_prune" "$model2"
+
+    # Prune non-existent model fails
+    run_test "model prune non-existent fails" assert_failure \
+        ./ankigo model prune "NONEXISTENT_MODEL_${RANDOM}" --force
+}
+
+test_model_prune_skips_nonempty() {
+    # Create model with a note (should be skipped by prune)
+    local model_name="${TEST_PREFIX}_HasNotes"
+    local deck_name="${TEST_PREFIX}_PruneDeck"
+
+    ./ankigo model create "$model_name" \
+        --field Front --field Back \
+        --template "Card 1,{{Front}},{{Back}}" >/dev/null
+    ./ankigo deck create "$deck_name" >/dev/null
+
+    # Create a note using this model
+    ./ankigo note create --deck "$deck_name" --model "$model_name" \
+        --field "Front=Q" --field "Back=A" >/dev/null
+
+    # Prune should skip this model (it has notes)
+    local prune_output
+    prune_output=$(./ankigo model prune "$model_name" 2>&1)
+    run_test "model prune skips non-empty" assert_contains "$prune_output" "Skipped"
+
+    # Model should still exist
+    local list_after
+    list_after=$(./ankigo model list)
+    run_test "non-empty model still exists" assert_contains "$list_after" "$model_name"
+}
+
 # =============================================================================
 # Main Execution
 # =============================================================================
@@ -499,6 +665,22 @@ test_version_help
 echo ""
 echo "[Deck List]"
 test_deck_list
+
+echo ""
+echo "[Model List]"
+test_model_list
+
+echo ""
+echo "[Model Create]"
+test_model_create
+
+echo ""
+echo "[Model Prune]"
+test_model_prune
+
+echo ""
+echo "[Model Prune - Skips Non-Empty]"
+test_model_prune_skips_nonempty
 
 echo ""
 echo "[Deck Create]"

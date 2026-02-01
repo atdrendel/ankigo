@@ -35,10 +35,12 @@ type mockClient struct {
 	addedNote       *ankiconnect.Note // captures note passed to AddNote
 	addNoteID       int64
 	addNoteErr      error
-	modelNames      []string
-	modelNamesErr   error
-	modelFieldNames map[string][]string // model name -> field names
-	modelFieldsErr  error
+	modelNames          []string
+	modelNamesErr       error
+	modelNamesAndIDs    map[string]int64
+	modelNamesAndIDsErr error
+	modelFieldNames     map[string][]string // model name -> field names
+	modelFieldsErr      error
 
 	// Note delete fields
 	deletedNotes   []int64 // captures IDs passed to DeleteNotes
@@ -50,6 +52,15 @@ type mockClient struct {
 	noteInfos     []ankiconnect.NoteInfo // return value for NotesInfo
 	notesInfoErr  error
 	noteQuery     string // captures query passed to FindNotes
+
+	// Model create fields
+	createModelResult  map[string]interface{}
+	createModelErr     error
+	createdModelParams *ankiconnect.CreateModelParams // captures params passed to CreateModel
+
+	// Model prune fields
+	removeEmptyNotesErr    error
+	removeEmptyNotesCalled bool
 }
 
 func (m *mockClient) DeckNames() ([]string, error) {
@@ -92,6 +103,13 @@ func (m *mockClient) ModelNames() ([]string, error) {
 	return m.modelNames, m.modelNamesErr
 }
 
+func (m *mockClient) ModelNamesAndIds() (map[string]int64, error) {
+	if m.modelNamesAndIDsErr != nil {
+		return nil, m.modelNamesAndIDsErr
+	}
+	return m.modelNamesAndIDs, m.err
+}
+
 func (m *mockClient) ModelFieldNames(modelName string) ([]string, error) {
 	if m.modelFieldsErr != nil {
 		return nil, m.modelFieldsErr
@@ -104,6 +122,16 @@ func (m *mockClient) ModelFieldNames(modelName string) ([]string, error) {
 		return nil, fmt.Errorf("model was not found: %s", modelName)
 	}
 	return fields, nil
+}
+
+func (m *mockClient) CreateModel(params ankiconnect.CreateModelParams) (map[string]interface{}, error) {
+	m.createdModelParams = &params
+	return m.createModelResult, m.createModelErr
+}
+
+func (m *mockClient) RemoveEmptyNotes() error {
+	m.removeEmptyNotesCalled = true
+	return m.removeEmptyNotesErr
 }
 
 func (m *mockClient) DeleteNotes(notes []int64) error {

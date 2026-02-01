@@ -100,6 +100,22 @@ type CardInfo struct {
 	Mod        int64                `json:"mod"`
 }
 
+// CardTemplate represents a card template for model creation.
+type CardTemplate struct {
+	Name  string `json:"Name"`
+	Front string `json:"Front"`
+	Back  string `json:"Back"`
+}
+
+// CreateModelParams contains parameters for creating a model.
+type CreateModelParams struct {
+	ModelName     string
+	Fields        []string
+	CardTemplates []CardTemplate
+	CSS           string
+	IsCloze       bool
+}
+
 // Client defines the interface for interacting with anki-connect.
 type Client interface {
 	DeckNames() ([]string, error)
@@ -113,7 +129,10 @@ type Client interface {
 	NotesInfo(noteIDs []int64) ([]NoteInfo, error)
 	AddNote(note Note) (int64, error)
 	ModelNames() ([]string, error)
+	ModelNamesAndIds() (map[string]int64, error)
 	ModelFieldNames(modelName string) ([]string, error)
+	CreateModel(params CreateModelParams) (map[string]interface{}, error)
+	RemoveEmptyNotes() error
 }
 
 // HTTPClient is the real implementation that communicates with anki-connect.
@@ -481,6 +500,41 @@ func (c *HTTPClient) ModelNames() ([]string, error) {
 	return models, nil
 }
 
+// ModelNamesAndIds returns a map of model names to their IDs.
+func (c *HTTPClient) ModelNamesAndIds() (map[string]int64, error) {
+	req := request{
+		Action:  "modelNamesAndIds",
+		Version: 6,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	if apiResp.Error != nil {
+		return nil, errors.New(*apiResp.Error)
+	}
+
+	var models map[string]int64
+	if err := json.Unmarshal(apiResp.Result, &models); err != nil {
+		return nil, err
+	}
+
+	return models, nil
+}
+
 // ModelFieldNames returns the field names for a given model.
 func (c *HTTPClient) ModelFieldNames(modelName string) ([]string, error) {
 	req := request{
@@ -595,6 +649,86 @@ func (c *HTTPClient) DeleteNotes(notes []int64) error {
 		Action:  "deleteNotes",
 		Version: 6,
 		Params:  map[string]interface{}{"notes": notes},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return err
+	}
+
+	if apiResp.Error != nil {
+		return errors.New(*apiResp.Error)
+	}
+
+	return nil
+}
+
+// CreateModel creates a new note type (model).
+func (c *HTTPClient) CreateModel(params CreateModelParams) (map[string]interface{}, error) {
+	reqParams := map[string]interface{}{
+		"modelName":     params.ModelName,
+		"inOrderFields": params.Fields,
+		"cardTemplates": params.CardTemplates,
+	}
+
+	if params.CSS != "" {
+		reqParams["css"] = params.CSS
+	}
+
+	if params.IsCloze {
+		reqParams["isCloze"] = true
+	}
+
+	req := request{
+		Action:  "createModel",
+		Version: 6,
+		Params:  reqParams,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	if apiResp.Error != nil {
+		return nil, errors.New(*apiResp.Error)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(apiResp.Result, &result); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// RemoveEmptyNotes removes all notes with no cards and models with no notes.
+func (c *HTTPClient) RemoveEmptyNotes() error {
+	req := request{
+		Action:  "removeEmptyNotes",
+		Version: 6,
 	}
 
 	body, err := json.Marshal(req)
