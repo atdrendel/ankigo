@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/atdrendel/ankigo/internal/ankiconnect"
 )
 
 // === Note Create Tests ===
@@ -1075,6 +1078,322 @@ func TestNoteDelete_ConnectionError(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 	if !strings.Contains(err.Error(), "failed to delete notes") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// === Note List Tests ===
+
+func TestNoteList_NoQuery_ListsAllNotes(t *testing.T) {
+	mock := &mockClient{
+		noteIDs: []int64{111, 222, 333},
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: false, fields: nil}
+	err := runNoteList(mock, &buf, "", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// When no query is provided, should use "deck:*" to match all notes
+	if mock.noteQuery != "deck:*" {
+		t.Errorf("expected query 'deck:*', got %q", mock.noteQuery)
+	}
+	// Default output is just note IDs
+	expected := "111\n222\n333\n"
+	if buf.String() != expected {
+		t.Errorf("expected output %q, got %q", expected, buf.String())
+	}
+}
+
+func TestNoteList_WithQuery_FiltersNotes(t *testing.T) {
+	mock := &mockClient{
+		noteIDs: []int64{123, 456},
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: false, fields: nil}
+	err := runNoteList(mock, &buf, "deck:Japanese", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.noteQuery != "deck:Japanese" {
+		t.Errorf("expected query 'deck:Japanese', got %q", mock.noteQuery)
+	}
+	expected := "123\n456\n"
+	if buf.String() != expected {
+		t.Errorf("expected output %q, got %q", expected, buf.String())
+	}
+}
+
+func TestNoteList_EmptyResult(t *testing.T) {
+	mock := &mockClient{
+		noteIDs: []int64{},
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: false, fields: nil}
+	err := runNoteList(mock, &buf, "deck:NonExistent", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := "No notes found\n"
+	if buf.String() != expected {
+		t.Errorf("expected output %q, got %q", expected, buf.String())
+	}
+}
+
+func TestNoteList_WithFields_Model(t *testing.T) {
+	mock := &mockClient{
+		noteIDs: []int64{111, 222},
+		noteInfos: []ankiconnect.NoteInfo{
+			{NoteID: 111, ModelName: "Basic"},
+			{NoteID: 222, ModelName: "Cloze"},
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: false, fields: []string{"id", "model"}}
+	err := runNoteList(mock, &buf, "deck:Test", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := "111\tBasic\n222\tCloze\n"
+	if buf.String() != expected {
+		t.Errorf("expected output %q, got %q", expected, buf.String())
+	}
+}
+
+func TestNoteList_WithFields_Tags(t *testing.T) {
+	mock := &mockClient{
+		noteIDs: []int64{111},
+		noteInfos: []ankiconnect.NoteInfo{
+			{NoteID: 111, Tags: []string{"vocab", "japanese"}},
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: false, fields: []string{"id", "tags"}}
+	err := runNoteList(mock, &buf, "deck:Test", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Tags should be comma-separated in text output
+	expected := "111\tvocab,japanese\n"
+	if buf.String() != expected {
+		t.Errorf("expected output %q, got %q", expected, buf.String())
+	}
+}
+
+func TestNoteList_WithFields_Multiple(t *testing.T) {
+	mock := &mockClient{
+		noteIDs: []int64{111},
+		noteInfos: []ankiconnect.NoteInfo{
+			{
+				NoteID:    111,
+				ModelName: "Basic",
+				Tags:      []string{"tag1"},
+				Mod:       1609459200,
+				Cards:     []int64{999, 888},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: false, fields: []string{"id", "model", "tags", "mod", "cards"}}
+	err := runNoteList(mock, &buf, "deck:Test", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Cards should be comma-separated in text output
+	expected := "111\tBasic\ttag1\t1609459200\t999,888\n"
+	if buf.String() != expected {
+		t.Errorf("expected output %q, got %q", expected, buf.String())
+	}
+}
+
+func TestNoteList_JSON_AllFields(t *testing.T) {
+	mock := &mockClient{
+		noteIDs: []int64{111},
+		noteInfos: []ankiconnect.NoteInfo{
+			{
+				NoteID:    111,
+				ModelName: "Basic",
+				Tags:      []string{"tag1", "tag2"},
+				Fields: map[string]ankiconnect.NoteFieldValue{
+					"Front": {Value: "Q", Order: 0},
+					"Back":  {Value: "A", Order: 1},
+				},
+				Mod:   1609459200,
+				Cards: []int64{999},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: true, fields: nil}
+	err := runNoteList(mock, &buf, "deck:Test", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Parse JSON output
+	var result []map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(result))
+	}
+
+	entry := result[0]
+	if entry["id"].(float64) != 111 {
+		t.Errorf("expected id 111, got %v", entry["id"])
+	}
+	if entry["model"] != "Basic" {
+		t.Errorf("expected model 'Basic', got %v", entry["model"])
+	}
+	tags := entry["tags"].([]interface{})
+	if len(tags) != 2 || tags[0] != "tag1" || tags[1] != "tag2" {
+		t.Errorf("expected tags ['tag1', 'tag2'], got %v", tags)
+	}
+}
+
+func TestNoteList_JSON_SelectedFields(t *testing.T) {
+	mock := &mockClient{
+		noteIDs: []int64{111},
+		noteInfos: []ankiconnect.NoteInfo{
+			{NoteID: 111, ModelName: "Basic", Tags: []string{"tag1"}},
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: true, fields: []string{"id", "model"}}
+	err := runNoteList(mock, &buf, "deck:Test", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result []map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(result))
+	}
+
+	entry := result[0]
+	if entry["id"].(float64) != 111 {
+		t.Errorf("expected id 111, got %v", entry["id"])
+	}
+	if entry["model"] != "Basic" {
+		t.Errorf("expected model 'Basic', got %v", entry["model"])
+	}
+	// Should not have tags since it wasn't requested
+	if _, hasTags := entry["tags"]; hasTags {
+		t.Error("expected tags field to be absent")
+	}
+}
+
+func TestNoteList_JSON_EmptyResult(t *testing.T) {
+	mock := &mockClient{
+		noteIDs: []int64{},
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: true, fields: nil}
+	err := runNoteList(mock, &buf, "deck:Test", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := "[]\n"
+	if buf.String() != expected {
+		t.Errorf("expected output %q, got %q", expected, buf.String())
+	}
+}
+
+func TestNoteList_InvalidField(t *testing.T) {
+	mock := &mockClient{
+		noteIDs: []int64{111},
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: false, fields: []string{"invalid_field"}}
+	err := runNoteList(mock, &buf, "deck:Test", opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "unknown field: invalid_field" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestNoteList_ConnectionError(t *testing.T) {
+	mock := &mockClient{
+		findNotesErr: errors.New("connection refused"),
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: false, fields: nil}
+	err := runNoteList(mock, &buf, "deck:Test", opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to find notes") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestNoteList_MissingNoteInfo(t *testing.T) {
+	// When notesInfo returns fewer entries than expected
+	mock := &mockClient{
+		noteIDs: []int64{111, 222},
+		noteInfos: []ankiconnect.NoteInfo{
+			{NoteID: 111, ModelName: "Basic"}, // Only one entry
+		},
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: false, fields: []string{"id", "model"}}
+	err := runNoteList(mock, &buf, "deck:Test", opts)
+
+	// Should still succeed, outputting empty model for missing note
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := "111\tBasic\n222\t\n"
+	if buf.String() != expected {
+		t.Errorf("expected output %q, got %q", expected, buf.String())
+	}
+}
+
+func TestNoteList_NotesInfoError(t *testing.T) {
+	mock := &mockClient{
+		noteIDs:      []int64{111},
+		notesInfoErr: errors.New("notes info error"),
+	}
+
+	var buf bytes.Buffer
+	opts := noteListOptions{json: false, fields: []string{"id", "model"}}
+	err := runNoteList(mock, &buf, "deck:Test", opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to get note info") {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

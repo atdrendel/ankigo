@@ -61,6 +61,22 @@ type MediaAttachment struct {
 	Fields         []string `json:"fields,omitempty"`
 }
 
+// NoteInfo contains detailed information about a note.
+type NoteInfo struct {
+	NoteID    int64                     `json:"noteId"`
+	ModelName string                    `json:"modelName"`
+	Tags      []string                  `json:"tags"`
+	Fields    map[string]NoteFieldValue `json:"fields"`
+	Mod       int64                     `json:"mod"`
+	Cards     []int64                   `json:"cards"`
+}
+
+// NoteFieldValue represents a single field value in a note.
+type NoteFieldValue struct {
+	Value string `json:"value"`
+	Order int    `json:"order"`
+}
+
 // CardInfo contains detailed information about a card.
 type CardInfo struct {
 	CardID     int64                `json:"cardId"`
@@ -93,6 +109,8 @@ type Client interface {
 	DeleteDecks(decks []string) error
 	FindCards(query string) ([]int64, error)
 	CardsInfo(cardIDs []int64) ([]CardInfo, error)
+	FindNotes(query string) ([]int64, error)
+	NotesInfo(noteIDs []int64) ([]NoteInfo, error)
 	AddNote(note Note) (int64, error)
 	ModelNames() ([]string, error)
 	ModelFieldNames(modelName string) ([]string, error)
@@ -497,6 +515,78 @@ func (c *HTTPClient) ModelFieldNames(modelName string) ([]string, error) {
 	}
 
 	return fields, nil
+}
+
+// FindNotes searches for notes matching the query and returns note IDs.
+func (c *HTTPClient) FindNotes(query string) ([]int64, error) {
+	req := request{
+		Action:  "findNotes",
+		Version: 6,
+		Params:  map[string]interface{}{"query": query},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	if apiResp.Error != nil {
+		return nil, errors.New(*apiResp.Error)
+	}
+
+	var noteIDs []int64
+	if err := json.Unmarshal(apiResp.Result, &noteIDs); err != nil {
+		return nil, err
+	}
+
+	return noteIDs, nil
+}
+
+// NotesInfo returns detailed information for the given note IDs.
+func (c *HTTPClient) NotesInfo(noteIDs []int64) ([]NoteInfo, error) {
+	req := request{
+		Action:  "notesInfo",
+		Version: 6,
+		Params:  map[string]interface{}{"notes": noteIDs},
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Post(c.BaseURL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var apiResp response
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	if apiResp.Error != nil {
+		return nil, errors.New(*apiResp.Error)
+	}
+
+	var notes []NoteInfo
+	if err := json.Unmarshal(apiResp.Result, &notes); err != nil {
+		return nil, err
+	}
+
+	return notes, nil
 }
 
 // DeleteNotes deletes notes by their IDs.

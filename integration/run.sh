@@ -324,6 +324,62 @@ test_note_delete_validation() {
         assert_failure ./ankigo note delete "not-a-number"
 }
 
+test_note_list() {
+    local deck_name="${TEST_PREFIX}_NoteListTest"
+    ./ankigo deck create "$deck_name" >/dev/null
+
+    # Create test notes with distinct tags for filtering
+    local note1 note2
+    note1=$(./ankigo note create -d "$deck_name" -f "Q1" -b "A1" --tags "${TEST_PREFIX}_tag1,${TEST_PREFIX}_tag2")
+    note2=$(./ankigo note create -d "$deck_name" -f "Q2" -b "A2" --tags "${TEST_PREFIX}_tag2,${TEST_PREFIX}_tag3")
+
+    # Basic list returns note IDs
+    local result
+    result=$(./ankigo note list "deck:$deck_name")
+    run_test "note list returns results" assert_not_empty "$result"
+    run_test "note list includes note1" assert_contains "$result" "$note1"
+    run_test "note list includes note2" assert_contains "$result" "$note2"
+
+    # List with tag filter
+    result=$(./ankigo note list "deck:$deck_name tag:${TEST_PREFIX}_tag1")
+    run_test "note list with tag filter returns note1" assert_contains "$result" "$note1"
+
+    # List with fields
+    result=$(./ankigo note list "deck:$deck_name" --fields id,model)
+    run_test "note list with fields contains Basic" assert_contains "$result" "Basic"
+
+    # JSON output
+    result=$(./ankigo note list "deck:$deck_name" --json)
+    run_test "note list JSON is valid" assert_json_array "$result"
+
+    # Empty result (non-existent deck)
+    result=$(./ankigo note list "deck:NonExistentDeck_${TEST_PREFIX}" 2>&1 || true)
+    run_test "note list empty result" assert_contains "$result" "No notes found"
+}
+
+test_note_list_validation() {
+    run_test "note list invalid field fails" \
+        assert_failure ./ankigo note list "deck:Default" --fields invalid_field
+}
+
+test_note_list_all() {
+    # Test listing all notes (no query) - only verifies command succeeds
+    # and returns valid output (we don't check content since we don't
+    # want to depend on or inspect user's existing notes)
+    local deck_name="${TEST_PREFIX}_NoteListAllTest"
+    ./ankigo deck create "$deck_name" >/dev/null
+
+    # Create a test note so we have at least one
+    local note_id
+    note_id=$(./ankigo note create -d "$deck_name" -f "AllQ" -b "AllA")
+
+    # List all notes should succeed and include our test note
+    local result
+    result=$(./ankigo note list)
+    run_test "note list (no query) succeeds" assert_not_empty "$result"
+    run_test "note list includes test note" assert_contains "$result" "$note_id"
+}
+
 test_card_search() {
     local deck_name="${TEST_PREFIX}_SearchTest"
     ./ankigo deck create "$deck_name" >/dev/null
@@ -487,6 +543,18 @@ test_note_delete_multiple
 echo ""
 echo "[Note Delete - Validation]"
 test_note_delete_validation
+
+echo ""
+echo "[Note List]"
+test_note_list
+
+echo ""
+echo "[Note List - Validation]"
+test_note_list_validation
+
+echo ""
+echo "[Note List - All]"
+test_note_list_all
 
 echo ""
 echo "[Card Search]"

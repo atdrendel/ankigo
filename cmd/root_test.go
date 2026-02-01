@@ -55,6 +55,12 @@ func TestRootCommand(t *testing.T) {
 			wantOutput: "",
 			wantErr:    true,
 		},
+		{
+			name:       "note list --help succeeds",
+			args:       []string{"note", "list", "--help"},
+			wantOutput: "List notes",
+			wantErr:    false,
+		},
 	}
 
 	for _, tt := range tests {

@@ -23,6 +23,8 @@ type Client interface {
 	DeleteDecks(decks []string) error
 	FindCards(query string) ([]int64, error)
 	CardsInfo(cardIDs []int64) ([]ankiconnect.CardInfo, error)
+	FindNotes(query string) ([]int64, error)
+	NotesInfo(noteIDs []int64) ([]ankiconnect.NoteInfo, error)
 	AddNote(note ankiconnect.Note) (int64, error)
 	DeleteNotes(notes []int64) error
 	ModelNames() ([]string, error)

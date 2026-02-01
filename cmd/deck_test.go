@@ -43,6 +43,13 @@ type mockClient struct {
 	// Note delete fields
 	deletedNotes   []int64 // captures IDs passed to DeleteNotes
 	deleteNotesErr error
+
+	// Note list fields
+	noteIDs       []int64 // return value for FindNotes
+	findNotesErr  error
+	noteInfos     []ankiconnect.NoteInfo // return value for NotesInfo
+	notesInfoErr  error
+	noteQuery     string // captures query passed to FindNotes
 }
 
 func (m *mockClient) DeckNames() ([]string, error) {
@@ -102,6 +109,15 @@ func (m *mockClient) ModelFieldNames(modelName string) ([]string, error) {
 func (m *mockClient) DeleteNotes(notes []int64) error {
 	m.deletedNotes = notes
 	return m.deleteNotesErr
+}
+
+func (m *mockClient) FindNotes(query string) ([]int64, error) {
+	m.noteQuery = query
+	return m.noteIDs, m.findNotesErr
+}
+
+func (m *mockClient) NotesInfo(noteIDs []int64) ([]ankiconnect.NoteInfo, error) {
+	return m.noteInfos, m.notesInfoErr
 }
 
 func TestDeckList_PlainText_Default(t *testing.T) {
