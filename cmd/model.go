@@ -316,7 +316,7 @@ var modelCreateCmd = &cobra.Command{
 
   # Cloze model
   ankigo model create "My Cloze" --field Text --field Extra --cloze \
-    --template "Cloze,{{cloze:Text}},{{Text}}<br>{{Extra}}"
+    --template "Cloze,{{cloze:Text}},{{cloze:Text}}<br>{{Extra}}"
 
   # With custom CSS
   ankigo model create "Styled" --field Q --field A \
@@ -496,14 +496,11 @@ type modelPruneOptions struct {
 }
 
 var modelPruneCmd = &cobra.Command{
-	Use:   "prune [model-names...]",
+	Use:   "prune",
 	Short: "Remove empty note types (models)",
 	Long: `Remove note types (models) that have no notes using them.
 
-If model names are provided, only those models are pruned (if empty).
-If no names are provided, all empty models are pruned.
-
-Requires confirmation or --force flag.`,
+All empty models are pruned. Requires confirmation or --force flag.`,
 	Example: `  # Remove all empty models (with confirmation)
   ankigo model prune
 
@@ -511,11 +508,8 @@ Requires confirmation or --force flag.`,
   ankigo model prune --force
 
   # Preview what would be removed
-  ankigo model prune --dry-run
-
-  # Remove specific empty models
-  ankigo model prune "Unused Model 1" "Unused Model 2" --force`,
-	Args: cobra.ArbitraryArgs,
+  ankigo model prune --dry-run`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Silence usage for errors that happen during execution (not arg validation)
 		cmd.SilenceUsage = true
@@ -525,41 +519,21 @@ Requires confirmation or --force flag.`,
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 		opts := modelPruneOptions{force: force, dryRun: dryRun}
-		return runModelPrune(client, os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), args, opts, isStdinTerminal)
+		return runModelPrune(client, os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts, isStdinTerminal)
 	},
 }
 
 // runModelPrune is the testable implementation of model prune.
-func runModelPrune(client Client, stdin io.Reader, stdout, stderr io.Writer, names []string, opts modelPruneOptions, isTerminal func() bool) error {
+func runModelPrune(client Client, stdin io.Reader, stdout, stderr io.Writer, opts modelPruneOptions, isTerminal func() bool) error {
 	// Get all model names
 	allModels, err := client.ModelNames()
 	if err != nil {
 		return fmt.Errorf("failed to get model names: %w", err)
 	}
 
-	// Build set of existing models
-	existingModels := make(map[string]bool)
-	for _, name := range allModels {
-		existingModels[name] = true
-	}
-
-	// Determine which models to check
-	var modelsToCheck []string
-	if len(names) > 0 {
-		// Validate requested models exist
-		for _, name := range names {
-			if !existingModels[name] {
-				return fmt.Errorf("model not found: %s", name)
-			}
-		}
-		modelsToCheck = names
-	} else {
-		modelsToCheck = allModels
-	}
-
 	// Find empty models (models with no notes)
 	var emptyModels []string
-	for _, name := range modelsToCheck {
+	for _, name := range allModels {
 		// Query for notes using this model
 		noteIDs, err := client.FindNotes(fmt.Sprintf("note:%q", name))
 		if err != nil {
@@ -568,17 +542,12 @@ func runModelPrune(client Client, stdin io.Reader, stdout, stderr io.Writer, nam
 
 		if len(noteIDs) == 0 {
 			emptyModels = append(emptyModels, name)
-		} else if len(names) > 0 {
-			// Only report skipped if specific models were requested
-			fmt.Fprintf(stderr, "Skipped %s: has %d notes\n", name, len(noteIDs))
 		}
 	}
 
 	// Check if there's anything to do
 	if len(emptyModels) == 0 {
-		if len(names) == 0 {
-			fmt.Fprintln(stderr, "No empty models found")
-		}
+		fmt.Fprintln(stderr, "No empty models found")
 		return nil
 	}
 

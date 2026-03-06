@@ -686,7 +686,7 @@ func TestModelPrune_All_Force(t *testing.T) {
 	var stdin bytes.Buffer
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: true, dryRun: false}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
+	err := runModelPrune(mock, &stdin, &stdout, &stderr, opts, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -695,66 +695,6 @@ func TestModelPrune_All_Force(t *testing.T) {
 	// Should have called RemoveEmptyNotes
 	if !mock.removeEmptyNotesCalled {
 		t.Error("expected RemoveEmptyNotes to be called")
-	}
-}
-
-func TestModelPrune_Specific_Force(t *testing.T) {
-	mock := &mockClient{
-		modelNames: []string{"Empty1", "Empty2"},
-		noteIDs:    []int64{}, // no notes
-	}
-
-	var stdin bytes.Buffer
-	var stdout, stderr bytes.Buffer
-	opts := modelPruneOptions{force: true, dryRun: false}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{"Empty1"}, opts, alwaysInteractive)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Check that removeEmptyNotes was called
-	if !mock.removeEmptyNotesCalled {
-		t.Error("expected RemoveEmptyNotes to be called")
-	}
-}
-
-func TestModelPrune_SkipsNonEmpty(t *testing.T) {
-	mock := &mockClient{
-		modelNames: []string{"HasNotes"},
-		noteIDs:    []int64{1, 2, 3}, // has notes
-	}
-
-	var stdin bytes.Buffer
-	var stdout, stderr bytes.Buffer
-	opts := modelPruneOptions{force: true, dryRun: false}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{"HasNotes"}, opts, alwaysInteractive)
-
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Should report that model was skipped
-	if !strings.Contains(stderr.String(), "Skipped") {
-		t.Errorf("expected 'Skipped' message, got %q", stderr.String())
-	}
-}
-
-func TestModelPrune_NotFound(t *testing.T) {
-	mock := &mockClient{
-		modelNames: []string{"Existing"},
-	}
-
-	var stdin bytes.Buffer
-	var stdout, stderr bytes.Buffer
-	opts := modelPruneOptions{force: true, dryRun: false}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{"NonExistent"}, opts, alwaysInteractive)
-
-	if err == nil {
-		t.Fatal("expected error for non-existent model")
-	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("expected 'not found' error, got %v", err)
 	}
 }
 
@@ -767,7 +707,7 @@ func TestModelPrune_DryRun(t *testing.T) {
 	var stdin bytes.Buffer
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{dryRun: true}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
+	err := runModelPrune(mock, &stdin, &stdout, &stderr, opts, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -793,7 +733,7 @@ func TestModelPrune_NoEmptyModels(t *testing.T) {
 	var stdin bytes.Buffer
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: true, dryRun: false}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
+	err := runModelPrune(mock, &stdin, &stdout, &stderr, opts, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -815,7 +755,7 @@ func TestModelPrune_ConfirmYes(t *testing.T) {
 	stdin := bytes.NewBufferString("y\n")
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: false, dryRun: false}
-	err := runModelPrune(mock, stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
+	err := runModelPrune(mock, stdin, &stdout, &stderr, opts, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -845,7 +785,7 @@ func TestModelPrune_ConfirmNo(t *testing.T) {
 	stdin := bytes.NewBufferString("n\n")
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: false, dryRun: false}
-	err := runModelPrune(mock, stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
+	err := runModelPrune(mock, stdin, &stdout, &stderr, opts, alwaysInteractive)
 
 	// Should return ErrCancelled
 	if err != ErrCancelled {
@@ -867,7 +807,7 @@ func TestModelPrune_NonInteractiveWithoutForce(t *testing.T) {
 	var stdin bytes.Buffer
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: false, dryRun: false}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{}, opts, neverInteractive)
+	err := runModelPrune(mock, &stdin, &stdout, &stderr, opts, neverInteractive)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -890,7 +830,7 @@ func TestModelPrune_ConfirmEmpty(t *testing.T) {
 	stdin := bytes.NewBufferString("\n") // empty response = no
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: false, dryRun: false}
-	err := runModelPrune(mock, stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
+	err := runModelPrune(mock, stdin, &stdout, &stderr, opts, alwaysInteractive)
 
 	// Should return ErrCancelled
 	if err != ErrCancelled {

@@ -127,7 +127,7 @@ test_note_create_basic() {
     ./ankigo deck create "$deck_name" >/dev/null
 
     local note_id
-    note_id=$(./ankigo note create -d "$deck_name" -f "Test front" -b "Test back")
+    note_id=$(./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "Test front" -b "Test back")
     run_test "note create returns numeric ID" assert_numeric "$note_id"
 
     # Verify card appears in search (notes create cards)
@@ -137,12 +137,12 @@ test_note_create_basic() {
 
     # Note with tags
     run_test "note create with tags" \
-        assert_success ./ankigo note create -d "$deck_name" \
+        assert_success ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Tagged Q" -b "Tagged A" --tags "${TEST_PREFIX}_tag1,${TEST_PREFIX}_tag2"
 
     # Unicode content
     run_test "note create with unicode" \
-        assert_success ./ankigo note create -d "$deck_name" \
+        assert_success ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "日本とは何ですか？" -b "Japan"
 }
 
@@ -151,13 +151,13 @@ test_note_create_validation() {
     ./ankigo deck create "$deck_name" >/dev/null
 
     run_test "note create missing --front fails" \
-        assert_failure ./ankigo note create -d "$deck_name" -b "back only"
+        assert_failure ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -b "back only"
 
     run_test "note create missing --back fails" \
-        assert_failure ./ankigo note create -d "$deck_name" -f "front only"
+        assert_failure ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "front only"
 
     run_test "note create non-existent deck fails" \
-        assert_failure ./ankigo note create -d "NONEXISTENT_DECK_${RANDOM}" \
+        assert_failure ./ankigo note create -d "NONEXISTENT_DECK_${RANDOM}" -m "$TEST_MODEL" \
             -f "Q" -b "A"
 
     run_test "note create non-existent model fails" \
@@ -172,21 +172,21 @@ test_note_create_duplicates() {
     ./ankigo deck create "$deck_name2" >/dev/null
 
     # Create original note
-    ./ankigo note create -d "$deck_name" -f "Duplicate Q ${TEST_PREFIX}" -b "Duplicate A" >/dev/null
+    ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "Duplicate Q ${TEST_PREFIX}" -b "Duplicate A" >/dev/null
 
     # Duplicate should fail
     run_test "duplicate note fails" \
-        assert_failure ./ankigo note create -d "$deck_name" \
+        assert_failure ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Duplicate Q ${TEST_PREFIX}" -b "Duplicate A"
 
     # Duplicate with --allow-duplicate succeeds
     run_test "duplicate with --allow-duplicate succeeds" \
-        assert_success ./ankigo note create -d "$deck_name" \
+        assert_success ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Duplicate Q ${TEST_PREFIX}" -b "Duplicate A" --allow-duplicate
 
     # Duplicate in different deck with --duplicate-scope deck succeeds
     run_test "duplicate in different deck with scope succeeds" \
-        assert_success ./ankigo note create -d "$deck_name2" \
+        assert_success ./ankigo note create -d "$deck_name2" -m "$TEST_MODEL" \
             -f "Duplicate Q ${TEST_PREFIX}" -b "Duplicate A" --duplicate-scope deck
 }
 
@@ -211,39 +211,39 @@ test_note_create_media() {
 
     # Test: Note with audio from relative path
     run_test "note create with audio (relative path)" \
-        assert_success ./ankigo note create -d "$deck_name" \
+        assert_success ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Audio Q" -b "Audio A" \
             --audio "filename=${TEST_PREFIX}_audio.mp3,path=$test_audio,fields=Back"
 
     # Test: Note with picture from relative path
     run_test "note create with picture (relative path)" \
-        assert_success ./ankigo note create -d "$deck_name" \
+        assert_success ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Picture Q" -b "Picture A" \
             --picture "filename=${TEST_PREFIX}_image.png,path=$test_image,fields=Front"
 
     # Test: Note with video from relative path
     run_test "note create with video (relative path)" \
-        assert_success ./ankigo note create -d "$deck_name" \
+        assert_success ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Video Q" -b "Video A" \
             --video "filename=${TEST_PREFIX}_video.mp4,path=$test_video,fields=Back"
 
     # Test: Note with multiple media types
     run_test "note create with multiple media" \
-        assert_success ./ankigo note create -d "$deck_name" \
+        assert_success ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Multi Q" -b "Multi A" \
             --audio "filename=${TEST_PREFIX}_a2.mp3,path=$test_audio,fields=Back" \
             --picture "filename=${TEST_PREFIX}_i2.png,path=$test_image,fields=Front"
 
     # Test: Note with media attached to multiple fields
     run_test "note create with media on multiple fields" \
-        assert_success ./ankigo note create -d "$deck_name" \
+        assert_success ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Both Q" -b "Both A" \
             --picture "filename=${TEST_PREFIX}_both.png,path=$test_image,fields=Front;Back"
 
     # Test: Note with absolute path (should also work)
     local abs_audio="$SCRIPT_DIR/testdata/test.mp3"
     run_test "note create with audio (absolute path)" \
-        assert_success ./ankigo note create -d "$deck_name" \
+        assert_success ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Abs Audio Q" -b "Abs Audio A" \
             --audio "filename=${TEST_PREFIX}_abs_audio.mp3,path=$abs_audio,fields=Back"
 }
@@ -254,22 +254,22 @@ test_note_create_media_errors() {
 
     # Test: Missing filename
     run_test "note create media missing filename fails" \
-        assert_failure ./ankigo note create -d "$deck_name" \
+        assert_failure ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Q" -b "A" --audio "path=/tmp/test.mp3,fields=Back"
 
     # Test: Missing source (no path/url/data)
     run_test "note create media missing source fails" \
-        assert_failure ./ankigo note create -d "$deck_name" \
+        assert_failure ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Q" -b "A" --audio "filename=test.mp3,fields=Back"
 
     # Test: Missing fields
     run_test "note create media missing fields fails" \
-        assert_failure ./ankigo note create -d "$deck_name" \
+        assert_failure ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Q" -b "A" --audio "filename=test.mp3,path=/tmp/test.mp3"
 
     # Test: Invalid spec format
     run_test "note create media invalid format fails" \
-        assert_failure ./ankigo note create -d "$deck_name" \
+        assert_failure ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" \
             -f "Q" -b "A" --audio "invalid"
 }
 
@@ -279,7 +279,7 @@ test_note_delete() {
 
     # Create a note to delete
     local note_id
-    note_id=$(./ankigo note create -d "$deck_name" -f "Delete me" -b "Answer")
+    note_id=$(./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "Delete me" -b "Answer")
     run_test "note create returns numeric ID" assert_numeric "$note_id"
 
     # Verify note exists via card search
@@ -303,7 +303,7 @@ test_note_delete_dryrun() {
     ./ankigo deck create "$deck_name" >/dev/null
 
     local note_id
-    note_id=$(./ankigo note create -d "$deck_name" -f "Dry run Q" -b "Dry run A")
+    note_id=$(./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "Dry run Q" -b "Dry run A")
 
     # Dry run should NOT delete
     ./ankigo note delete "$note_id" --dry-run >/dev/null 2>&1 || true
@@ -319,8 +319,8 @@ test_note_delete_multiple() {
     ./ankigo deck create "$deck_name" >/dev/null
 
     local note1 note2
-    note1=$(./ankigo note create -d "$deck_name" -f "Q1" -b "A1")
-    note2=$(./ankigo note create -d "$deck_name" -f "Q2" -b "A2")
+    note1=$(./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "Q1" -b "A1")
+    note2=$(./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "Q2" -b "A2")
 
     run_test "note delete multiple succeeds" \
         assert_success ./ankigo note delete "$note1" "$note2" --force
@@ -345,8 +345,8 @@ test_note_list() {
 
     # Create test notes with distinct tags for filtering
     local note1 note2
-    note1=$(./ankigo note create -d "$deck_name" -f "Q1" -b "A1" --tags "${TEST_PREFIX}_tag1,${TEST_PREFIX}_tag2")
-    note2=$(./ankigo note create -d "$deck_name" -f "Q2" -b "A2" --tags "${TEST_PREFIX}_tag2,${TEST_PREFIX}_tag3")
+    note1=$(./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "Q1" -b "A1" --tags "${TEST_PREFIX}_tag1,${TEST_PREFIX}_tag2")
+    note2=$(./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "Q2" -b "A2" --tags "${TEST_PREFIX}_tag2,${TEST_PREFIX}_tag3")
 
     # Basic list returns note IDs
     local result
@@ -361,7 +361,7 @@ test_note_list() {
 
     # List with fields
     result=$(./ankigo note list "deck:$deck_name" --fields id,model)
-    run_test "note list with fields contains Basic" assert_contains "$result" "Basic"
+    run_test "note list with fields contains model" assert_contains "$result" "$TEST_MODEL"
 
     # JSON output
     result=$(./ankigo note list "deck:$deck_name" --json)
@@ -386,7 +386,7 @@ test_note_list_all() {
 
     # Create a test note so we have at least one
     local note_id
-    note_id=$(./ankigo note create -d "$deck_name" -f "AllQ" -b "AllA")
+    note_id=$(./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "AllQ" -b "AllA")
 
     # List all notes should succeed and include our test note
     local result
@@ -398,7 +398,7 @@ test_note_list_all() {
 test_card_search() {
     local deck_name="${TEST_PREFIX}_SearchTest"
     ./ankigo deck create "$deck_name" >/dev/null
-    ./ankigo note create -d "$deck_name" -f "Search Q" -b "Search A" \
+    ./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "Search Q" -b "Search A" \
         --tags "${TEST_PREFIX}_searchtag" >/dev/null
 
     run_test "card search by deck" \
@@ -494,19 +494,13 @@ test_exit_codes() {
 }
 
 test_model_list() {
-    # -------------------------------------------------------------------------
-    # READ-ONLY TESTS (built-in models)
-    # These tests verify functionality against Anki's built-in models.
-    # -------------------------------------------------------------------------
-
     # Test that model list runs successfully
     run_test "model list succeeds" assert_success ./ankigo model list
 
-    # Every Anki installation has Basic and Cloze models
+    # Verify test model appears (created in setup)
     local result
     result=$(./ankigo model list)
-    run_test "model list includes Basic" assert_contains "$result" "Basic"
-    run_test "model list includes Cloze" assert_contains "$result" "Cloze"
+    run_test "model list includes test model" assert_contains "$result" "$TEST_MODEL"
 
     # Test with fields flag
     run_test "model list --fields name,id succeeds" \
@@ -552,7 +546,7 @@ test_model_create() {
     run_test "create cloze model" assert_success \
         ./ankigo model create "$cloze_name" \
             --field Text --field Extra --cloze \
-            --template "Cloze,{{cloze:Text}},{{Text}}"
+            --template "Cloze,{{cloze:Text}},{{cloze:Text}}<br>{{Extra}}"
 
     # Create model with multiple templates
     local multi_name="${TEST_PREFIX}_MultiTemplate"
@@ -588,35 +582,131 @@ test_model_create() {
 }
 
 test_model_prune() {
-    # Create empty test models
+    # Create an empty test model
     local model1="${TEST_PREFIX}_PruneMe1"
-    local model2="${TEST_PREFIX}_PruneMe2"
     ./ankigo model create "$model1" \
-        --field Front --field Back \
-        --template "Card 1,{{Front}},{{Back}}" >/dev/null
-    ./ankigo model create "$model2" \
         --field Front --field Back \
         --template "Card 1,{{Front}},{{Back}}" >/dev/null
 
     # Dry run doesn't remove
-    ./ankigo model prune "$model1" --dry-run >/dev/null 2>&1
+    ./ankigo model prune --dry-run >/dev/null 2>&1
     local list_after_dry
     list_after_dry=$(./ankigo model list)
     run_test "model prune --dry-run doesn't remove" assert_contains "$list_after_dry" "$model1"
 
-    # Prune specific empty model (with --force to skip confirmation)
-    run_test "model prune specific succeeds" assert_success \
-        ./ankigo model prune "$model1" --force
+    # Prune all empty models (with --force to skip confirmation)
+    run_test "model prune succeeds" assert_success \
+        ./ankigo model prune --force
 
     # Verify model is gone
     local list_after_prune
     list_after_prune=$(./ankigo model list)
     run_test "pruned model not in list" assert_not_contains "$list_after_prune" "$model1"
-    run_test "other model still exists" assert_contains "$list_after_prune" "$model2"
+}
 
-    # Prune non-existent model fails
-    run_test "model prune non-existent fails" assert_failure \
-        ./ankigo model prune "NONEXISTENT_MODEL_${RANDOM}" --force
+test_note_create_schema() {
+    local schema_output
+    schema_output=$(./ankigo note create --schema)
+    run_test "note create --schema outputs valid JSON" assert_valid_json "$schema_output"
+    run_test "note create --schema contains deckName" assert_contains "$schema_output" "deckName"
+    run_test "note create --schema contains modelName" assert_contains "$schema_output" "modelName"
+    run_test "note create --schema contains fields" assert_contains "$schema_output" "fields"
+}
+
+test_model_create_schema() {
+    local schema_output
+    schema_output=$(./ankigo model create --schema)
+    run_test "model create --schema outputs valid JSON" assert_valid_json "$schema_output"
+    run_test "model create --schema contains modelName" assert_contains "$schema_output" "modelName"
+    run_test "model create --schema contains fields" assert_contains "$schema_output" "fields"
+    run_test "model create --schema contains templates" assert_contains "$schema_output" "templates"
+}
+
+test_note_create_input_json() {
+    local deck_name="${TEST_PREFIX}_InputJSONNote"
+    ./ankigo deck create "$deck_name" >/dev/null
+
+    # Happy path: create note via --input-json
+    local note_id
+    note_id=$(./ankigo note create --input-json "{
+        \"deckName\": \"$deck_name\",
+        \"modelName\": \"$TEST_MODEL\",
+        \"fields\": {\"Front\": \"JSON Q\", \"Back\": \"JSON A\"},
+        \"tags\": [\"${TEST_PREFIX}_json\"]
+    }")
+    run_test "note create --input-json returns numeric ID" assert_numeric "$note_id"
+
+    # Verify note exists
+    local search_result
+    search_result=$(./ankigo card search "deck:$deck_name")
+    run_test "note created via --input-json appears in search" assert_not_empty "$search_result"
+
+    # Error: invalid JSON
+    run_test "note create --input-json invalid JSON fails" \
+        assert_failure ./ankigo note create --input-json "not json"
+
+    # Error: conflict with --front flag
+    run_test "note create --input-json with --front fails" \
+        assert_failure ./ankigo note create --input-json '{"deckName":"x","modelName":"Basic","fields":{"Front":"Q"}}' \
+            -f "conflict"
+}
+
+test_model_create_input_json() {
+    local model_name="${TEST_PREFIX}_InputJSONModel"
+
+    # Happy path: create model via --input-json (name from JSON, no positional arg)
+    run_test "model create --input-json succeeds" assert_success \
+        ./ankigo model create --input-json "{
+            \"modelName\": \"$model_name\",
+            \"fields\": [\"Question\", \"Answer\"],
+            \"templates\": [{\"name\": \"Card 1\", \"front\": \"{{Question}}\", \"back\": \"{{Answer}}\"}]
+        }"
+
+    # Verify model appears in list
+    local model_list
+    model_list=$(./ankigo model list)
+    run_test "model created via --input-json appears in list" assert_contains "$model_list" "$model_name"
+
+    # Verify fields
+    local fields_output
+    fields_output=$(./ankigo model list --fields name,fields | grep "$model_name")
+    run_test "model --input-json has correct fields" assert_contains "$fields_output" "Question,Answer"
+
+    # Error: invalid JSON
+    run_test "model create --input-json invalid JSON fails" \
+        assert_failure ./ankigo model create --input-json "not json"
+}
+
+test_non_tty_confirmation() {
+    local deck_name="${TEST_PREFIX}_NonTTYTest"
+    ./ankigo deck create "$deck_name" >/dev/null
+
+    # deck delete without --force in non-TTY mode should fail
+    local output
+    output=$(./ankigo deck delete "$deck_name" </dev/null 2>&1) || true
+    run_test "deck delete non-TTY without --force fails" \
+        assert_contains "$output" "use --force"
+
+    # Verify deck still exists
+    local deck_list
+    deck_list=$(./ankigo deck list)
+    run_test "deck not deleted in non-TTY mode" assert_contains "$deck_list" "$deck_name"
+
+    # note delete without --force in non-TTY mode
+    local note_id
+    note_id=$(./ankigo note create -d "$deck_name" -m "$TEST_MODEL" -f "NonTTY Q" -b "NonTTY A")
+    output=$(./ankigo note delete "$note_id" </dev/null 2>&1) || true
+    run_test "note delete non-TTY without --force fails" \
+        assert_contains "$output" "use --force"
+
+    # model prune without --force in non-TTY mode (model must be empty)
+    local model_name="${TEST_PREFIX}_NonTTYModel"
+    ./ankigo model create "$model_name" \
+        --field Front --field Back \
+        --template "Card 1,{{Front}},{{Back}}" >/dev/null
+    output=$(./ankigo model prune "$model_name" </dev/null 2>&1) || true
+    run_test "model prune non-TTY without --force fails" \
+        assert_contains "$output" "use --force"
 }
 
 test_model_prune_skips_nonempty() {
@@ -652,6 +742,15 @@ test_model_prune_skips_nonempty() {
 echo "[Build]"
 go build -o ankigo . || { echo "Build failed"; exit 1; }
 echo -e "${GREEN}✓${NC} built ankigo binary"
+
+# Create shared test model (replaces dependency on built-in "Basic")
+echo ""
+echo "[Setup]"
+TEST_MODEL="${TEST_PREFIX}_Model"
+./ankigo model create "$TEST_MODEL" \
+    --field Front --field Back \
+    --template "Card 1,{{Front}},{{Back}}" >/dev/null
+echo -e "${GREEN}✓${NC} created test model: $TEST_MODEL"
 echo ""
 
 # Run all tests
@@ -661,6 +760,14 @@ test_prerequisites
 echo ""
 echo "[Version & Help]"
 test_version_help
+
+echo ""
+echo "[Note Create - Schema]"
+test_note_create_schema
+
+echo ""
+echo "[Model Create - Schema]"
+test_model_create_schema
 
 echo ""
 echo "[Deck List]"
@@ -673,6 +780,10 @@ test_model_list
 echo ""
 echo "[Model Create]"
 test_model_create
+
+echo ""
+echo "[Model Create - Input JSON]"
+test_model_create_input_json
 
 echo ""
 echo "[Model Prune]"
@@ -709,6 +820,10 @@ test_note_create_media
 echo ""
 echo "[Note Create - Media Errors]"
 test_note_create_media_errors
+
+echo ""
+echo "[Note Create - Input JSON]"
+test_note_create_input_json
 
 echo ""
 echo "[Note Delete]"
@@ -761,6 +876,10 @@ test_deck_delete_nonexistent
 echo ""
 echo "[Deck Delete - Multiple]"
 test_deck_delete_multiple
+
+echo ""
+echo "[Non-TTY Confirmation]"
+test_non_tty_confirmation
 
 echo ""
 echo "[Exit Codes]"

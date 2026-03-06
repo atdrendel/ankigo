@@ -56,6 +56,11 @@ assert_numeric() {
     [[ "$1" =~ ^[0-9]+$ ]]
 }
 
+# Assert output is valid JSON (any type)
+assert_valid_json() {
+    echo "$1" | jq -e '.' >/dev/null 2>&1
+}
+
 # Assert output is valid JSON array
 assert_json_array() {
     echo "$1" | jq -e 'type == "array"' >/dev/null 2>&1
