@@ -846,15 +846,102 @@ myapp version --check     # show current and latest version
 
 ---
 
+## AI Agent Compatibility
+
+AI agents are increasingly the primary consumers of CLIs. Human DX optimizes for discoverability and forgiveness; Agent DX optimizes for predictability and defense-in-depth. A well-designed CLI serves both.
+
+### Raw JSON Input
+
+Agents prefer structured input over bespoke flags. A flag like `--title "My Doc"` can't express nested structures without custom abstractions. Support a raw JSON payload path alongside convenience flags:
+
+```bash
+# Human-friendly flags
+myapp user create --name "Alice" --email "alice@example.com"
+
+# Agent-friendly JSON (maps directly to the API schema)
+myapp user create --input-json '{"name": "Alice", "email": "alice@example.com", "roles": ["admin"]}'
+```
+
+The `--input-json` (or `--json`) flag should accept the full API payload. This eliminates translation loss between what the agent generates and what the API accepts.
+
+### Schema Introspection
+
+Agents can't google the docs without blowing up their token budget. Make the CLI self-describing at runtime:
+
+```bash
+myapp user create --schema
+# Outputs JSON Schema describing what --input-json accepts
+```
+
+This lets agents discover what a command accepts programmatically — no pre-stuffed documentation needed. Use standard JSON Schema so agents can validate input before sending it.
+
+### Input Hardening Against Hallucinations
+
+Humans typo. Agents hallucinate. The failure modes are different:
+
+| Input type | Human mistake | Agent mistake |
+|-----------|---------------|---------------|
+| File paths | Misspelling | Path traversal (`../../.ssh`) |
+| Control chars | Copy-paste garbage | Invisible characters in output |
+| Resource IDs | Misspelled ID | Embedded query params (`id?fields=name`) |
+| URL encoding | Rarely pre-encode | Double-encoding (`%2e%2e` for `..`) |
+
+Defend at the CLI boundary:
+- **Canonicalize and sandbox file paths** to the working directory
+- **Reject control characters** below ASCII 0x20 in string inputs
+- **Reject `?`, `#`, and `%`** in resource identifiers
+- **Validate before sending** — the CLI is the last line of defense
+
+### Context Window Discipline
+
+API responses can consume a meaningful fraction of an agent's context window. Agents pay per token and lose reasoning capacity with every irrelevant field.
+
+- **Support field masks** (`--fields "id,name,status"`) to limit what's returned
+- **Support NDJSON** (`--output jsonl`) for streaming large result sets without buffering a top-level array
+- **Default to minimal output** when stdout is not a TTY
+
+### Agent Auth
+
+Agents can't do browser-based OAuth. Support headless authentication:
+
+- **Environment variables** for tokens: `MYAPP_TOKEN`, `MYAPP_CREDENTIALS_FILE`
+- **Service accounts** where possible
+- Avoid flows that require a browser redirect
+
+### Agent Context Files
+
+Agents learn through context injected at conversation start, not `--help` and Stack Overflow. Ship machine-readable guidance alongside the CLI:
+
+- **`CONTEXT.md`** — Agent-specific guidance: which flags to always use, what to confirm before executing, common pitfalls
+- **Skill files** — Structured Markdown (with YAML frontmatter) describing workflows, one per API surface or task
+
+These encode invariants that agents can't intuit from `--help` alone, such as "always use `--dry-run` for mutating operations" or "always add `--fields` to list calls."
+
+### MCP (Model Context Protocol)
+
+If the CLI wraps a structured API, consider exposing it as typed JSON-RPC tools over stdio via MCP. This eliminates shell escaping, argument parsing ambiguity, and output parsing — the agent calls a typed function instead of constructing a command string.
+
+### Non-TTY Behavior
+
+When stdout is not a terminal:
+- **Skip interactive prompts** — don't hang waiting for input that will never come
+- **Suppress colors and progress indicators** — they're noise for machines
+- **Default to machine-readable output** — plain text or JSON instead of tables
+
+When stdin is not a terminal:
+- **Decline confirmations by default** — require `--force` for destructive actions
+- **Accept piped input** where sensible
+
 ## Security Considerations
 
 - Never log secrets or tokens
 - Mask sensitive values in debug output
 - Use secure credential storage (keychain/keyring)
-- Validate all input (assume hostile)
+- Validate all input (assume hostile — whether from humans or AI agents)
 - Be careful with shell expansion in generated commands
 - Warn about insecure file permissions on config files
 - Support `--dry-run` for destructive operations
+- **Response sanitization** — Consider that API responses may contain prompt injection attempts (e.g., a malicious email body saying "Ignore previous instructions..."). If your CLI's output will be consumed by an AI agent, sanitize or flag suspicious content in API responses before returning them
 
 ---
 
@@ -872,6 +959,9 @@ For every command, verify:
 - [ ] Works in pipes (non-TTY mode)
 - [ ] Handles interrupts gracefully
 - [ ] Destructive actions require confirmation (unless `--force`)
+- [ ] Works in non-TTY mode (no hanging prompts, machine-readable output)
+- [ ] Complex create commands support `--input-json` for raw payloads
+- [ ] Commands with `--input-json` support `--schema` for introspection
 
 ### Flag Checklist
 

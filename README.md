@@ -45,9 +45,41 @@ ankigo card add --front "Question" --back "Answer"
 ankigo card add -f "Question" -b "Answer" -d "My Deck"
 ankigo card search "tag:vocabulary"
 
+# Note commands
+ankigo note create --input-json '{
+  "deckName": "Default",
+  "modelName": "Basic",
+  "fields": {"Front": "Question", "Back": "Answer"}
+}'
+ankigo note list "deck:Default"
+ankigo note delete 1234567890
+
+# Model commands
+ankigo model create --input-json '{
+  "modelName": "My Model",
+  "fields": ["Front", "Back"],
+  "templates": [{"name": "Card 1", "front": "{{Front}}", "back": "{{Back}}"}]
+}'
+ankigo model list
+ankigo model prune
+
 # Enable verbose output
 ankigo --verbose deck list
 ```
+
+### Agent Usage
+
+Commands with `--input-json` support `--schema` to output the JSON Schema describing accepted input. This lets AI agents discover the expected format programmatically:
+
+```bash
+# Discover what note create accepts
+ankigo note create --schema
+
+# Discover what model create accepts
+ankigo model create --schema
+```
+
+When invoked non-interactively (stdin is not a TTY), confirmation prompts are skipped automatically. Use `--force` for destructive actions in scripts and agent pipelines.
 
 ## Shell Completion
 
@@ -121,8 +153,17 @@ ankigo/
 │   ├── version.go          # Version subcommand
 │   ├── deck.go             # Deck subcommands
 │   ├── card.go             # Card subcommands
+│   ├── note.go             # Note subcommands
+│   ├── model.go            # Model subcommands
+│   ├── confirm.go          # Confirmation prompts
+│   ├── errors.go           # Sentinel errors
 │   └── completion.go       # Shell completion
+├── integration/            # Integration tests (run against real Anki)
+│   ├── run.sh
+│   └── lib/
+│       └── helpers.sh
 └── internal/
+    ├── ankiconnect/        # anki-connect client
     └── version/            # Build-time version info
 ```
 

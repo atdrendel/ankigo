@@ -178,6 +178,46 @@ var myDeleteCmd = &cobra.Command{
 - Show defaults in help: `--timeout int  Request timeout (default: 30)`
 - Mark required flags: `--deck string  Target deck (required)`
 
+## Agent DX
+
+AI agents are first-class consumers of this CLI. Design every command to be predictable and machine-readable, not just human-friendly.
+
+### Established Patterns
+
+**`--input-json`** — Accept the full API payload as a single JSON argument. Available on `create` commands that take complex input (e.g., `note create`, `model create`). This maps directly to the anki-connect API schema — zero translation loss.
+
+```bash
+ankigo note create --input-json '{
+  "deckName": "German::Vocabulary",
+  "modelName": "Basic",
+  "fields": {"Front": "der Hund", "Back": "the dog"},
+  "tags": ["german", "animals"]
+}'
+```
+
+**`--schema`** — Print the JSON Schema for `--input-json` and exit immediately. No Anki connection needed. Available on any command that has `--input-json`.
+
+```bash
+# Agent discovers what the command accepts
+ankigo note create --schema
+
+# Then uses the schema to construct valid input
+ankigo note create --input-json '{ ... }'
+```
+
+**Non-TTY behavior** — When stdin is not a terminal (piped input, agent invocation), skip interactive confirmation prompts and default to declining. Agents must use `--force` to bypass confirmations. This prevents agents from hanging on unexpected prompts.
+
+### Input Hardening
+
+Agents hallucinate differently than humans typo. Validate inputs defensively:
+
+- **Path traversal** — Agents may generate `../../.ssh` by confusing path segments. Reject or sandbox file paths.
+- **Control characters** — Agents may produce invisible characters. Reject anything below ASCII 0x20 in string inputs where it doesn't belong.
+- **Embedded query params in IDs** — Agents may pass `fileId?fields=name` as a resource identifier. Reject `?` and `#` in IDs.
+- **Double-encoding** — Agents may pre-encode strings that get encoded again (`%2e%2e` for `..`). Reject `%` in resource names.
+
+The CLI is the last line of defense. Treat agent input like untrusted user input from a web form.
+
 ## CRUD Command Patterns
 
 ### `list`
@@ -200,6 +240,8 @@ ankigo card add --deck "Default" --front "Q" --back "A"
 
 - On success, output the created resource identifier
 - Support `--quiet` for scripts (output only ID)
+- For complex input: support `--input-json` accepting the full API payload
+- For schema discovery: support `--schema` to print JSON Schema for `--input-json`
 
 ### `delete` / `remove`
 
@@ -365,6 +407,9 @@ ankigo/
 - [ ] **Simulate the full user experience**: mentally run the command and read the complete output — check for redundant messages, unclear feedback, or missing information
 - [ ] **Integration tests added** in `integration/run.sh` (using `$TEST_PREFIX` for all test data)
 - [ ] **Help text examples** include multi-word query syntax (for commands accepting queries)
+- [ ] **`--input-json`** supported for `create` commands with complex input
+- [ ] **`--schema`** supported for commands with `--input-json`
+- [ ] **Non-TTY safe** — no hanging on prompts when stdin is not a terminal
 
 ## Help Text Examples
 
