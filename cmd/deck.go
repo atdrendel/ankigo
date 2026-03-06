@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -349,12 +348,12 @@ var deckDeleteCmd = &cobra.Command{
 		force, _ := cmd.Flags().GetBool("force")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		byID, _ := cmd.Flags().GetBool("id")
-		return runDeckDelete(client, os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), args, force, dryRun, byID)
+		return runDeckDelete(client, os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), args, force, dryRun, byID, isStdinTerminal)
 	},
 }
 
 // runDeckDelete is the testable implementation of deck delete.
-func runDeckDelete(client Client, stdin io.Reader, stdout, stderr io.Writer, args []string, force, dryRun, byID bool) error {
+func runDeckDelete(client Client, stdin io.Reader, stdout, stderr io.Writer, args []string, force, dryRun, byID bool, isTerminal func() bool) error {
 	if len(args) == 0 {
 		return fmt.Errorf("at least one deck name is required")
 	}
@@ -425,16 +424,8 @@ func runDeckDelete(client Client, stdin io.Reader, stdout, stderr io.Writer, arg
 		for _, deck := range decks {
 			fmt.Fprintf(stderr, "  - %s\n", deck)
 		}
-		fmt.Fprint(stderr, "Continue? [y/N] ")
-
-		reader := bufio.NewReader(stdin)
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			return ErrCancelled
-		}
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
-			return ErrCancelled
+		if err := requireConfirmation(stdin, stderr, isTerminal); err != nil {
+			return err
 		}
 	}
 

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -248,6 +247,58 @@ type modelCreateOptions struct {
 	css       string
 	cssFile   string
 	isCloze   bool
+	inputJSON string
+	schema    bool
+}
+
+// modelCreateSchemaJSON is the JSON Schema for --input-json on model create.
+const modelCreateSchemaJSON = `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Input schema for ankigo model create --input-json",
+  "type": "object",
+  "required": ["modelName", "fields", "templates"],
+  "properties": {
+    "modelName": { "type": "string", "description": "Unique name for the note type" },
+    "fields": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Field names in order"
+    },
+    "templates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["front", "back"],
+        "properties": {
+          "name": { "type": "string", "description": "Template name (auto-generated if omitted)" },
+          "front": { "type": "string", "description": "Front template HTML (use {{FieldName}} for substitution)" },
+          "back": { "type": "string", "description": "Back template HTML" }
+        }
+      },
+      "minItems": 1,
+      "description": "Card templates"
+    },
+    "css": { "type": "string", "description": "Custom CSS styling" },
+    "isCloze": { "type": "boolean", "description": "Create as cloze-deletion model" }
+  }
+}
+`
+
+// modelCreateInput is the JSON input structure for model create.
+type modelCreateInput struct {
+	ModelName string           `json:"modelName"`
+	Fields    []string         `json:"fields"`
+	Templates []templateInput  `json:"templates"`
+	CSS       string           `json:"css,omitempty"`
+	IsCloze   bool             `json:"isCloze,omitempty"`
+}
+
+// templateInput is the JSON input structure for a card template.
+type templateInput struct {
+	Name  string `json:"name"`
+	Front string `json:"front"`
+	Back  string `json:"back"`
 }
 
 var modelCreateCmd = &cobra.Command{
@@ -270,14 +321,29 @@ var modelCreateCmd = &cobra.Command{
   # With custom CSS
   ankigo model create "Styled" --field Q --field A \
     --template "Card 1,{{Q}},{{A}}" --css ".card { font-size: 24px; }"`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		schema, _ := cmd.Flags().GetBool("schema")
+		if schema {
+			return runModelCreate(nil, cmd.OutOrStdout(), cmd.ErrOrStderr(), "", modelCreateOptions{schema: true})
+		}
+
 		client := ankiconnect.DefaultClient()
+		inputJSON, _ := cmd.Flags().GetString("input-json")
 		fieldFlags, _ := cmd.Flags().GetStringArray("field")
 		templateFlags, _ := cmd.Flags().GetStringArray("template")
 		css, _ := cmd.Flags().GetString("css")
 		cssFile, _ := cmd.Flags().GetString("css-file")
 		isCloze, _ := cmd.Flags().GetBool("cloze")
+
+		// Require either positional arg or --input-json
+		name := ""
+		if len(args) > 0 {
+			name = args[0]
+		}
+		if name == "" && inputJSON == "" {
+			return fmt.Errorf("model name is required (as argument or in --input-json)")
+		}
 
 		opts := modelCreateOptions{
 			fields:    fieldFlags,
@@ -285,9 +351,10 @@ var modelCreateCmd = &cobra.Command{
 			css:       css,
 			cssFile:   cssFile,
 			isCloze:   isCloze,
+			inputJSON: inputJSON,
 		}
 
-		return runModelCreate(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], opts)
+		return runModelCreate(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), name, opts)
 	},
 }
 
@@ -308,6 +375,52 @@ func parseTemplateSpec(spec string) (ankiconnect.CardTemplate, error) {
 
 // runModelCreate is the testable implementation of model create.
 func runModelCreate(client Client, stdout, stderr io.Writer, name string, opts modelCreateOptions) error {
+	// Handle --schema: output JSON Schema and return
+	if opts.schema {
+		fmt.Fprint(stdout, modelCreateSchemaJSON)
+		return nil
+	}
+
+	// Handle --input-json
+	if opts.inputJSON != "" {
+		var input modelCreateInput
+		if err := json.Unmarshal([]byte(opts.inputJSON), &input); err != nil {
+			return fmt.Errorf("invalid JSON input: %w", err)
+		}
+
+		// Use name from JSON if not provided as positional arg
+		if name == "" {
+			name = input.ModelName
+		}
+
+		// Convert templates
+		var cardTemplates []ankiconnect.CardTemplate
+		for _, t := range input.Templates {
+			cardTemplates = append(cardTemplates, ankiconnect.CardTemplate{
+				Name:  t.Name,
+				Front: t.Front,
+				Back:  t.Back,
+			})
+		}
+
+		params := ankiconnect.CreateModelParams{
+			ModelName:     name,
+			Fields:        input.Fields,
+			CardTemplates: cardTemplates,
+			CSS:           input.CSS,
+			IsCloze:       input.IsCloze,
+		}
+
+		result, err := client.CreateModel(params)
+		if err != nil {
+			return fmt.Errorf("failed to create model: %w", err)
+		}
+		if id, ok := result["id"]; ok {
+			fmt.Fprintln(stdout, id)
+		}
+		return nil
+	}
+
 	// Validate name
 	trimmedName := strings.TrimSpace(name)
 	if trimmedName == "" {
@@ -412,12 +525,12 @@ Requires confirmation or --force flag.`,
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 		opts := modelPruneOptions{force: force, dryRun: dryRun}
-		return runModelPrune(client, os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), args, opts)
+		return runModelPrune(client, os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), args, opts, isStdinTerminal)
 	},
 }
 
 // runModelPrune is the testable implementation of model prune.
-func runModelPrune(client Client, stdin io.Reader, stdout, stderr io.Writer, names []string, opts modelPruneOptions) error {
+func runModelPrune(client Client, stdin io.Reader, stdout, stderr io.Writer, names []string, opts modelPruneOptions, isTerminal func() bool) error {
 	// Get all model names
 	allModels, err := client.ModelNames()
 	if err != nil {
@@ -484,16 +597,8 @@ func runModelPrune(client Client, stdin io.Reader, stdout, stderr io.Writer, nam
 		for _, name := range emptyModels {
 			fmt.Fprintf(stderr, "  - %s\n", name)
 		}
-		fmt.Fprint(stderr, "Continue? [y/N] ")
-
-		reader := bufio.NewReader(stdin)
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			return ErrCancelled
-		}
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
-			return ErrCancelled
+		if err := requireConfirmation(stdin, stderr, isTerminal); err != nil {
+			return err
 		}
 	}
 
@@ -521,6 +626,8 @@ func init() {
 	modelCreateCmd.Flags().String("css", "", "Custom CSS styling")
 	modelCreateCmd.Flags().String("css-file", "", "Read CSS from file")
 	modelCreateCmd.Flags().Bool("cloze", false, "Create a Cloze-type model")
+	modelCreateCmd.Flags().String("input-json", "", "Create model from JSON (provides all parameters as structured input)")
+	modelCreateCmd.Flags().Bool("schema", false, "Print JSON Schema for --input-json and exit")
 
 	// model prune flags
 	modelPruneCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")

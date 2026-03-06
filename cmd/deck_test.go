@@ -148,6 +148,12 @@ func (m *mockClient) NotesInfo(noteIDs []int64) ([]ankiconnect.NoteInfo, error) 
 	return m.noteInfos, m.notesInfoErr
 }
 
+// alwaysInteractive is a test helper that simulates an interactive terminal.
+var alwaysInteractive = func() bool { return true }
+
+// neverInteractive is a test helper that simulates a non-interactive terminal.
+var neverInteractive = func() bool { return false }
+
 func TestDeckList_PlainText_Default(t *testing.T) {
 	mock := &mockClient{
 		decks: []string{"Default", "Japanese::JLPT N3"},
@@ -781,7 +787,7 @@ func TestDeckDelete_Success_SingleDeck(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Test Deck"}, true, false, false)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Test Deck"}, true, false, false, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -803,7 +809,7 @@ func TestDeckDelete_Success_MultipleDecks(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Deck1", "Deck2", "Deck3"}, true, false, false)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Deck1", "Deck2", "Deck3"}, true, false, false, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -827,7 +833,7 @@ func TestDeckDelete_APIError(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Test Deck"}, true, false, false)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Test Deck"}, true, false, false, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -841,7 +847,7 @@ func TestDeckDelete_NoDeckNames(t *testing.T) {
 	mock := &mockClient{}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{}, true, false, false)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{}, true, false, false, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -857,7 +863,7 @@ func TestDeckDelete_DryRun(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Deck1", "Deck2"}, true, true, false)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Deck1", "Deck2"}, true, true, false, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -883,7 +889,7 @@ func TestDeckDelete_ConfirmationYes(t *testing.T) {
 
 	stdin := bytes.NewBufferString("y\n")
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false)
+	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -912,7 +918,7 @@ func TestDeckDelete_ConfirmationYesFull(t *testing.T) {
 
 	stdin := bytes.NewBufferString("yes\n")
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false)
+	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -934,7 +940,7 @@ func TestDeckDelete_ConfirmationNo(t *testing.T) {
 
 	stdin := bytes.NewBufferString("n\n")
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false)
+	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -955,7 +961,7 @@ func TestDeckDelete_ConfirmationOther(t *testing.T) {
 
 	stdin := bytes.NewBufferString("maybe\n")
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false)
+	err := runDeckDelete(mock, stdin, &stdout, &stderr, []string{"Test Deck"}, false, false, false, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -975,7 +981,7 @@ func TestDeckDelete_HierarchicalDeck(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Japanese::JLPT N3::Vocabulary"}, true, false, false)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Japanese::JLPT N3::Vocabulary"}, true, false, false, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -997,7 +1003,7 @@ func TestDeckDelete_ByID_Success(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"1234567890"}, true, false, true)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"1234567890"}, true, false, true, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1023,7 +1029,7 @@ func TestDeckDelete_ByID_MultipleIDs(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"111", "333"}, true, false, true)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"111", "333"}, true, false, true, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1049,7 +1055,7 @@ func TestDeckDelete_ByID_NotFound(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"999999999"}, true, false, true)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"999999999"}, true, false, true, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -1071,7 +1077,7 @@ func TestDeckDelete_ByID_InvalidID(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"not-a-number"}, true, false, true)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"not-a-number"}, true, false, true, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -1094,7 +1100,7 @@ func TestDeckDelete_ByID_DryRun(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"1234567890", "1"}, true, true, true)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"1234567890", "1"}, true, true, true, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1119,7 +1125,7 @@ func TestDeckDelete_NonExistentDeck(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Missing"}, true, false, false)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Missing"}, true, false, false, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -1144,7 +1150,7 @@ func TestDeckDelete_MixedExistentAndNonExistent(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Existing", "Missing"}, true, false, false)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Existing", "Missing"}, true, false, false, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error for partial failure, got nil")
@@ -1167,13 +1173,33 @@ func TestDeckDelete_MixedExistentAndNonExistent(t *testing.T) {
 	}
 }
 
+func TestDeckDelete_NonInteractiveWithoutForce(t *testing.T) {
+	mock := &mockClient{
+		decks: []string{"Test Deck"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"Test Deck"}, false, false, false, neverInteractive)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("expected error mentioning --force, got: %v", err)
+	}
+	// Should NOT call the API
+	if mock.deletedDecks != nil {
+		t.Errorf("expected no API call, but deletedDecks was set to %v", mock.deletedDecks)
+	}
+}
+
 func TestDeckDelete_AllNonExistent(t *testing.T) {
 	mock := &mockClient{
 		decks: []string{"Default"},
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"A", "B"}, true, false, false)
+	err := runDeckDelete(mock, nil, &stdout, &stderr, []string{"A", "B"}, true, false, false, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")

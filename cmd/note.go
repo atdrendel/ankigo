@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +26,68 @@ type noteCreateOptions struct {
 	audio          []string
 	video          []string
 	picture        []string
+	inputJSON      string
+	schema         bool
+}
+
+// noteCreateSchemaJSON is the JSON Schema for --input-json on note create.
+const noteCreateSchemaJSON = `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Input schema for ankigo note create --input-json",
+  "type": "object",
+  "required": ["deckName", "modelName", "fields"],
+  "properties": {
+    "deckName": { "type": "string", "description": "Target deck name" },
+    "modelName": { "type": "string", "description": "Note type (model) name" },
+    "fields": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Field name to value mapping"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Tags for the note"
+    },
+    "allowDuplicate": { "type": "boolean", "description": "Allow adding duplicate notes" },
+    "duplicateScope": {
+      "type": "string",
+      "enum": ["deck", ""],
+      "description": "Scope for duplicate check: \"deck\" or empty for collection-wide"
+    },
+    "audio": { "type": "array", "items": { "$ref": "#/$defs/mediaAttachment" }, "description": "Audio attachments" },
+    "video": { "type": "array", "items": { "$ref": "#/$defs/mediaAttachment" }, "description": "Video attachments" },
+    "picture": { "type": "array", "items": { "$ref": "#/$defs/mediaAttachment" }, "description": "Picture attachments" }
+  },
+  "$defs": {
+    "mediaAttachment": {
+      "type": "object",
+      "required": ["filename"],
+      "properties": {
+        "filename": { "type": "string", "description": "Filename for the media in Anki's collection" },
+        "url": { "type": "string", "description": "URL to download the media from" },
+        "path": { "type": "string", "description": "Local file path (relative paths resolved to absolute)" },
+        "data": { "type": "string", "description": "Base64-encoded file data" },
+        "skipHash": { "type": "string", "description": "MD5 hash — skip storage if file with this hash exists" },
+        "deleteExisting": { "type": "boolean", "description": "Delete existing file with same name (default: true)" },
+        "fields": { "type": "array", "items": { "type": "string" }, "description": "Fields to add the media reference to" }
+      }
+    }
+  }
+}
+`
+
+// noteCreateInput is the JSON input structure for note create.
+type noteCreateInput struct {
+	DeckName       string                        `json:"deckName"`
+	ModelName      string                        `json:"modelName"`
+	Fields         map[string]string              `json:"fields"`
+	Tags           []string                       `json:"tags,omitempty"`
+	AllowDuplicate bool                           `json:"allowDuplicate,omitempty"`
+	DuplicateScope string                         `json:"duplicateScope,omitempty"`
+	Audio          []ankiconnect.MediaAttachment  `json:"audio,omitempty"`
+	Video          []ankiconnect.MediaAttachment  `json:"video,omitempty"`
+	Picture        []ankiconnect.MediaAttachment  `json:"picture,omitempty"`
 }
 
 // parseMediaSpec parses a media specification string into a MediaAttachment.
@@ -133,7 +194,14 @@ The --front and --back flags are shortcuts that set "Front" and "Back" fields.`,
     --audio "filename=a.mp3,path=./a.mp3,fields=Back" \
     --picture "filename=i.png,path=./i.png,fields=Front"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		schema, _ := cmd.Flags().GetBool("schema")
+		if schema {
+			return runNoteCreate(nil, cmd.OutOrStdout(), cmd.ErrOrStderr(), noteCreateOptions{schema: true})
+		}
+
 		client := ankiconnect.DefaultClient()
+
+		inputJSON, _ := cmd.Flags().GetString("input-json")
 
 		deck, _ := cmd.Flags().GetString("deck")
 		model, _ := cmd.Flags().GetString("model")
@@ -169,14 +237,69 @@ The --front and --back flags are shortcuts that set "Front" and "Back" fields.`,
 			audio:          audioFlags,
 			video:          videoFlags,
 			picture:        pictureFlags,
+			inputJSON:      inputJSON,
 		}
 
 		return runNoteCreate(client, cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 	},
 }
 
+// resolveMediaPaths converts relative paths to absolute paths in media attachments.
+func resolveMediaPaths(media []ankiconnect.MediaAttachment) {
+	for i := range media {
+		if media[i].Path != "" && !filepath.IsAbs(media[i].Path) {
+			if absPath, err := filepath.Abs(media[i].Path); err == nil {
+				media[i].Path = absPath
+			}
+		}
+	}
+}
+
 // runNoteCreate is the testable implementation of note create.
 func runNoteCreate(client Client, stdout, stderr io.Writer, opts noteCreateOptions) error {
+	// Handle --schema: output JSON Schema and return
+	if opts.schema {
+		fmt.Fprint(stdout, noteCreateSchemaJSON)
+		return nil
+	}
+
+	// Handle --input-json: parse and delegate to the common creation path
+	if opts.inputJSON != "" {
+		// Check for conflicts with other flags
+		if opts.front != "" || opts.back != "" || len(opts.fields) > 0 || len(opts.audio) > 0 || len(opts.video) > 0 || len(opts.picture) > 0 {
+			return fmt.Errorf("--input-json cannot be combined with --front, --back, --field, --audio, --video, or --picture")
+		}
+
+		var input noteCreateInput
+		if err := json.Unmarshal([]byte(opts.inputJSON), &input); err != nil {
+			return fmt.Errorf("invalid JSON input: %w", err)
+		}
+
+		// Resolve relative paths
+		resolveMediaPaths(input.Audio)
+		resolveMediaPaths(input.Video)
+		resolveMediaPaths(input.Picture)
+
+		// Build note directly from JSON input
+		note := ankiconnect.Note{
+			DeckName:  input.DeckName,
+			ModelName: input.ModelName,
+			Fields:    input.Fields,
+			Tags:      input.Tags,
+			Audio:     input.Audio,
+			Video:     input.Video,
+			Picture:   input.Picture,
+		}
+		if input.AllowDuplicate || input.DuplicateScope != "" {
+			note.Options = &ankiconnect.NoteOptions{
+				AllowDuplicate: input.AllowDuplicate,
+				DuplicateScope: input.DuplicateScope,
+			}
+		}
+
+		return createNote(client, stdout, note)
+	}
+
 	// Build the fields map
 	fields := make(map[string]string)
 
@@ -313,7 +436,11 @@ func runNoteCreate(client Client, stdout, stderr io.Writer, opts noteCreateOptio
 		}
 	}
 
-	// Create the note
+	return createNote(client, stdout, note)
+}
+
+// createNote sends the note to anki-connect and handles common error messages.
+func createNote(client Client, stdout io.Writer, note ankiconnect.Note) error {
 	noteID, err := client.AddNote(note)
 	if err != nil {
 		errMsg := err.Error()
@@ -324,10 +451,10 @@ func runNoteCreate(client Client, stdout, stderr io.Writer, opts noteCreateOptio
 			return fmt.Errorf("note content cannot be empty")
 		}
 		if strings.Contains(errMsg, "model was not found") {
-			return fmt.Errorf("model %q not found", opts.model)
+			return fmt.Errorf("model %q not found", note.ModelName)
 		}
 		if strings.Contains(errMsg, "deck was not found") {
-			return fmt.Errorf("deck %q not found", opts.deck)
+			return fmt.Errorf("deck %q not found", note.DeckName)
 		}
 		return fmt.Errorf("failed to add note: %w", err)
 	}
@@ -370,12 +497,12 @@ var noteDeleteCmd = &cobra.Command{
 			noteIDs = append(noteIDs, id)
 		}
 
-		return runNoteDelete(client, os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), noteIDs, force, dryRun)
+		return runNoteDelete(client, os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), noteIDs, force, dryRun, isStdinTerminal)
 	},
 }
 
 // runNoteDelete is the testable implementation of note delete.
-func runNoteDelete(client Client, stdin io.Reader, stdout, stderr io.Writer, noteIDs []int64, force, dryRun bool) error {
+func runNoteDelete(client Client, stdin io.Reader, stdout, stderr io.Writer, noteIDs []int64, force, dryRun bool, isTerminal func() bool) error {
 	// Dry run: show what would be deleted
 	if dryRun {
 		fmt.Fprintln(stderr, "Would delete the following notes (and all their cards):")
@@ -391,16 +518,8 @@ func runNoteDelete(client Client, stdin io.Reader, stdout, stderr io.Writer, not
 		for _, id := range noteIDs {
 			fmt.Fprintf(stderr, "  - %d\n", id)
 		}
-		fmt.Fprint(stderr, "Continue? [y/N] ")
-
-		reader := bufio.NewReader(stdin)
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			return ErrCancelled
-		}
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
-			return ErrCancelled
+		if err := requireConfirmation(stdin, stderr, isTerminal); err != nil {
+			return err
 		}
 	}
 
@@ -710,6 +829,8 @@ func init() {
 	noteCreateCmd.Flags().StringArray("audio", nil, `attach audio (format: "filename=name.mp3,path=/file.mp3,fields=Back")`)
 	noteCreateCmd.Flags().StringArray("video", nil, `attach video (format: "filename=name.mp4,url=https://...,fields=Back")`)
 	noteCreateCmd.Flags().StringArray("picture", nil, `attach picture (format: "filename=name.jpg,path=/file.jpg,fields=Front")`)
+	noteCreateCmd.Flags().String("input-json", "", "Create note from JSON (cannot be combined with other field flags)")
+	noteCreateCmd.Flags().Bool("schema", false, "Print JSON Schema for --input-json and exit")
 
 	noteDeleteCmd.Flags().BoolP("force", "f", false, "skip confirmation prompt")
 	noteDeleteCmd.Flags().Bool("dry-run", false, "show what would be deleted without deleting")

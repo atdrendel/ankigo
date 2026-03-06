@@ -967,13 +967,228 @@ func TestNoteCreate_InvalidMediaSpec(t *testing.T) {
 	}
 }
 
+// === Note Create JSON Input Tests ===
+
+func TestNoteCreate_InputJSON_Basic(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:       1234567890,
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := noteCreateOptions{
+		inputJSON: `{"deckName":"Default","modelName":"Basic","fields":{"Front":"Q","Back":"A"}}`,
+	}
+
+	err := runNoteCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.addedNote == nil {
+		t.Fatal("expected AddNote to be called")
+	}
+	if mock.addedNote.DeckName != "Default" {
+		t.Errorf("expected deck 'Default', got %q", mock.addedNote.DeckName)
+	}
+	if mock.addedNote.ModelName != "Basic" {
+		t.Errorf("expected model 'Basic', got %q", mock.addedNote.ModelName)
+	}
+	if mock.addedNote.Fields["Front"] != "Q" {
+		t.Errorf("expected Front 'Q', got %q", mock.addedNote.Fields["Front"])
+	}
+	if mock.addedNote.Fields["Back"] != "A" {
+		t.Errorf("expected Back 'A', got %q", mock.addedNote.Fields["Back"])
+	}
+	if stdout.String() != "1234567890\n" {
+		t.Errorf("expected stdout '1234567890\\n', got %q", stdout.String())
+	}
+}
+
+func TestNoteCreate_InputJSON_WithTags(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:       1234567890,
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := noteCreateOptions{
+		inputJSON: `{"deckName":"Default","modelName":"Basic","fields":{"Front":"Q","Back":"A"},"tags":["tag1","tag2"]}`,
+	}
+
+	err := runNoteCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.addedNote.Tags) != 2 || mock.addedNote.Tags[0] != "tag1" || mock.addedNote.Tags[1] != "tag2" {
+		t.Errorf("expected tags [tag1, tag2], got %v", mock.addedNote.Tags)
+	}
+}
+
+func TestNoteCreate_InputJSON_WithMedia(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:       1234567890,
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := noteCreateOptions{
+		inputJSON: `{"deckName":"Default","modelName":"Basic","fields":{"Front":"Q","Back":"A"},"audio":[{"filename":"a.mp3","path":"/tmp/a.mp3","fields":["Back"]}]}`,
+	}
+
+	err := runNoteCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.addedNote.Audio) != 1 {
+		t.Fatalf("expected 1 audio attachment, got %d", len(mock.addedNote.Audio))
+	}
+	if mock.addedNote.Audio[0].Filename != "a.mp3" {
+		t.Errorf("expected filename 'a.mp3', got %q", mock.addedNote.Audio[0].Filename)
+	}
+	if mock.addedNote.Audio[0].Path != "/tmp/a.mp3" {
+		t.Errorf("expected path '/tmp/a.mp3', got %q", mock.addedNote.Audio[0].Path)
+	}
+	if len(mock.addedNote.Audio[0].Fields) != 1 || mock.addedNote.Audio[0].Fields[0] != "Back" {
+		t.Errorf("expected fields [Back], got %v", mock.addedNote.Audio[0].Fields)
+	}
+}
+
+func TestNoteCreate_InputJSON_WithOptions(t *testing.T) {
+	mock := &mockClient{
+		addNoteID:       1234567890,
+		modelNames:      []string{"Basic"},
+		modelFieldNames: map[string][]string{"Basic": {"Front", "Back"}},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := noteCreateOptions{
+		inputJSON: `{"deckName":"Default","modelName":"Basic","fields":{"Front":"Q","Back":"A"},"allowDuplicate":true,"duplicateScope":"deck"}`,
+	}
+
+	err := runNoteCreate(mock, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.addedNote.Options == nil {
+		t.Fatal("expected Options to be set")
+	}
+	if !mock.addedNote.Options.AllowDuplicate {
+		t.Error("expected AllowDuplicate to be true")
+	}
+	if mock.addedNote.Options.DuplicateScope != "deck" {
+		t.Errorf("expected DuplicateScope 'deck', got %q", mock.addedNote.Options.DuplicateScope)
+	}
+}
+
+func TestNoteCreate_InputJSON_InvalidJSON(t *testing.T) {
+	mock := &mockClient{}
+
+	var stdout, stderr bytes.Buffer
+	opts := noteCreateOptions{
+		inputJSON: `{invalid json`,
+	}
+
+	err := runNoteCreate(mock, &stdout, &stderr, opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid JSON") {
+		t.Errorf("expected 'invalid JSON' error, got: %v", err)
+	}
+}
+
+func TestNoteCreate_InputJSON_ConflictWithFlags(t *testing.T) {
+	mock := &mockClient{}
+
+	var stdout, stderr bytes.Buffer
+	opts := noteCreateOptions{
+		inputJSON: `{"deckName":"Default","modelName":"Basic","fields":{"Front":"Q","Back":"A"}}`,
+		front:     "Q",
+	}
+
+	err := runNoteCreate(mock, &stdout, &stderr, opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--input-json") {
+		t.Errorf("expected error about --input-json conflict, got: %v", err)
+	}
+}
+
+// === Note Create Schema Tests ===
+
+func TestNoteCreate_Schema(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	opts := noteCreateOptions{schema: true}
+
+	// Should work with nil client — no Anki connection needed
+	err := runNoteCreate(nil, &stdout, &stderr, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should output valid JSON
+	var schema map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("expected valid JSON, got error: %v", err)
+	}
+
+	// Verify top-level structure
+	if schema["type"] != "object" {
+		t.Errorf("expected type 'object', got %v", schema["type"])
+	}
+
+	required, ok := schema["required"].([]interface{})
+	if !ok {
+		t.Fatal("expected 'required' to be an array")
+	}
+	requiredSet := make(map[string]bool)
+	for _, r := range required {
+		requiredSet[r.(string)] = true
+	}
+	for _, field := range []string{"deckName", "modelName", "fields"} {
+		if !requiredSet[field] {
+			t.Errorf("expected %q in required fields", field)
+		}
+	}
+
+	props, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected 'properties' to be an object")
+	}
+	for _, field := range []string{"deckName", "modelName", "fields", "tags", "audio", "video", "picture"} {
+		if _, ok := props[field]; !ok {
+			t.Errorf("expected property %q in schema", field)
+		}
+	}
+
+	// Should have $defs with mediaAttachment
+	defs, ok := schema["$defs"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected '$defs' to be an object")
+	}
+	if _, ok := defs["mediaAttachment"]; !ok {
+		t.Error("expected 'mediaAttachment' in $defs")
+	}
+}
+
 // === Note Delete Tests ===
 
 func TestNoteDelete_Success_SingleNote(t *testing.T) {
 	mock := &mockClient{}
 
 	var stdout, stderr bytes.Buffer
-	err := runNoteDelete(mock, nil, &stdout, &stderr, []int64{1234567890}, true, false)
+	err := runNoteDelete(mock, nil, &stdout, &stderr, []int64{1234567890}, true, false, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -990,7 +1205,7 @@ func TestNoteDelete_Success_MultipleNotes(t *testing.T) {
 	mock := &mockClient{}
 
 	var stdout, stderr bytes.Buffer
-	err := runNoteDelete(mock, nil, &stdout, &stderr, []int64{111, 222, 333}, true, false)
+	err := runNoteDelete(mock, nil, &stdout, &stderr, []int64{111, 222, 333}, true, false, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1008,7 +1223,7 @@ func TestNoteDelete_DryRun(t *testing.T) {
 	mock := &mockClient{}
 
 	var stdout, stderr bytes.Buffer
-	err := runNoteDelete(mock, nil, &stdout, &stderr, []int64{1234567890}, true, true)
+	err := runNoteDelete(mock, nil, &stdout, &stderr, []int64{1234567890}, true, true, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1032,7 +1247,7 @@ func TestNoteDelete_ConfirmationYes(t *testing.T) {
 
 	stdin := bytes.NewBufferString("y\n")
 	var stdout, stderr bytes.Buffer
-	err := runNoteDelete(mock, stdin, &stdout, &stderr, []int64{1234567890}, false, false)
+	err := runNoteDelete(mock, stdin, &stdout, &stderr, []int64{1234567890}, false, false, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1052,7 +1267,7 @@ func TestNoteDelete_ConfirmationNo(t *testing.T) {
 
 	stdin := bytes.NewBufferString("n\n")
 	var stdout, stderr bytes.Buffer
-	err := runNoteDelete(mock, stdin, &stdout, &stderr, []int64{1234567890}, false, false)
+	err := runNoteDelete(mock, stdin, &stdout, &stderr, []int64{1234567890}, false, false, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -1066,13 +1281,31 @@ func TestNoteDelete_ConfirmationNo(t *testing.T) {
 	}
 }
 
+func TestNoteDelete_NonInteractiveWithoutForce(t *testing.T) {
+	mock := &mockClient{}
+
+	var stdout, stderr bytes.Buffer
+	err := runNoteDelete(mock, nil, &stdout, &stderr, []int64{1234567890}, false, false, neverInteractive)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("expected error mentioning --force, got: %v", err)
+	}
+	// Should NOT call the API
+	if mock.deletedNotes != nil {
+		t.Errorf("expected no API call, but deletedNotes was set to %v", mock.deletedNotes)
+	}
+}
+
 func TestNoteDelete_ConnectionError(t *testing.T) {
 	mock := &mockClient{
 		deleteNotesErr: errors.New("connection refused"),
 	}
 
 	var stdout, stderr bytes.Buffer
-	err := runNoteDelete(mock, nil, &stdout, &stderr, []int64{1234567890}, true, false)
+	err := runNoteDelete(mock, nil, &stdout, &stderr, []int64{1234567890}, true, false, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")

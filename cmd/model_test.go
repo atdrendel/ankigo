@@ -535,6 +535,145 @@ func TestModelCreate_WhitespaceOnlyName(t *testing.T) {
 }
 
 // =============================================================================
+// Model Create JSON Input Tests
+// =============================================================================
+
+func TestModelCreate_InputJSON_Basic(t *testing.T) {
+	mock := &mockClient{
+		createModelResult: map[string]interface{}{"id": int64(1234567890)},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := modelCreateOptions{
+		inputJSON: `{"modelName":"Vocab","fields":["Front","Back"],"templates":[{"name":"Card 1","front":"{{Front}}","back":"{{Back}}"}]}`,
+	}
+	err := runModelCreate(mock, &stdout, &stderr, "", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.createdModelParams == nil {
+		t.Fatal("expected CreateModel to be called")
+	}
+	if mock.createdModelParams.ModelName != "Vocab" {
+		t.Errorf("expected model name 'Vocab', got %q", mock.createdModelParams.ModelName)
+	}
+	if len(mock.createdModelParams.Fields) != 2 {
+		t.Errorf("expected 2 fields, got %d", len(mock.createdModelParams.Fields))
+	}
+	if len(mock.createdModelParams.CardTemplates) != 1 {
+		t.Errorf("expected 1 template, got %d", len(mock.createdModelParams.CardTemplates))
+	}
+	if mock.createdModelParams.CardTemplates[0].Name != "Card 1" {
+		t.Errorf("expected template name 'Card 1', got %q", mock.createdModelParams.CardTemplates[0].Name)
+	}
+}
+
+func TestModelCreate_InputJSON_WithCSS(t *testing.T) {
+	mock := &mockClient{
+		createModelResult: map[string]interface{}{"id": int64(1234567890)},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := modelCreateOptions{
+		inputJSON: `{"modelName":"Styled","fields":["Q","A"],"templates":[{"name":"Card 1","front":"{{Q}}","back":"{{A}}"}],"css":".card { font-size: 24px; }"}`,
+	}
+	err := runModelCreate(mock, &stdout, &stderr, "", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if mock.createdModelParams.CSS != ".card { font-size: 24px; }" {
+		t.Errorf("expected CSS to be set, got %q", mock.createdModelParams.CSS)
+	}
+}
+
+func TestModelCreate_InputJSON_Cloze(t *testing.T) {
+	mock := &mockClient{
+		createModelResult: map[string]interface{}{"id": int64(1234567890)},
+	}
+
+	var stdout, stderr bytes.Buffer
+	opts := modelCreateOptions{
+		inputJSON: `{"modelName":"My Cloze","fields":["Text","Extra"],"templates":[{"name":"Cloze","front":"{{cloze:Text}}","back":"{{Text}}"}],"isCloze":true}`,
+	}
+	err := runModelCreate(mock, &stdout, &stderr, "", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !mock.createdModelParams.IsCloze {
+		t.Error("expected IsCloze to be true")
+	}
+}
+
+func TestModelCreate_InputJSON_InvalidJSON(t *testing.T) {
+	mock := &mockClient{}
+
+	var stdout, stderr bytes.Buffer
+	opts := modelCreateOptions{
+		inputJSON: `{invalid`,
+	}
+	err := runModelCreate(mock, &stdout, &stderr, "", opts)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid JSON") {
+		t.Errorf("expected 'invalid JSON' error, got: %v", err)
+	}
+}
+
+// === Model Create Schema Tests ===
+
+func TestModelCreate_Schema(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	opts := modelCreateOptions{schema: true}
+
+	// Should work with nil client — no Anki connection needed
+	err := runModelCreate(nil, &stdout, &stderr, "", opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should output valid JSON
+	var schema map[string]interface{}
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("expected valid JSON, got error: %v", err)
+	}
+
+	// Verify top-level structure
+	if schema["type"] != "object" {
+		t.Errorf("expected type 'object', got %v", schema["type"])
+	}
+
+	required, ok := schema["required"].([]interface{})
+	if !ok {
+		t.Fatal("expected 'required' to be an array")
+	}
+	requiredSet := make(map[string]bool)
+	for _, r := range required {
+		requiredSet[r.(string)] = true
+	}
+	for _, field := range []string{"modelName", "fields", "templates"} {
+		if !requiredSet[field] {
+			t.Errorf("expected %q in required fields", field)
+		}
+	}
+
+	props, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected 'properties' to be an object")
+	}
+	for _, field := range []string{"modelName", "fields", "templates", "css", "isCloze"} {
+		if _, ok := props[field]; !ok {
+			t.Errorf("expected property %q in schema", field)
+		}
+	}
+}
+
+// =============================================================================
 // Model Prune Tests
 // =============================================================================
 
@@ -547,7 +686,7 @@ func TestModelPrune_All_Force(t *testing.T) {
 	var stdin bytes.Buffer
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: true, dryRun: false}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{}, opts)
+	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -568,7 +707,7 @@ func TestModelPrune_Specific_Force(t *testing.T) {
 	var stdin bytes.Buffer
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: true, dryRun: false}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{"Empty1"}, opts)
+	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{"Empty1"}, opts, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -589,7 +728,7 @@ func TestModelPrune_SkipsNonEmpty(t *testing.T) {
 	var stdin bytes.Buffer
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: true, dryRun: false}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{"HasNotes"}, opts)
+	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{"HasNotes"}, opts, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -609,7 +748,7 @@ func TestModelPrune_NotFound(t *testing.T) {
 	var stdin bytes.Buffer
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: true, dryRun: false}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{"NonExistent"}, opts)
+	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{"NonExistent"}, opts, alwaysInteractive)
 
 	if err == nil {
 		t.Fatal("expected error for non-existent model")
@@ -628,7 +767,7 @@ func TestModelPrune_DryRun(t *testing.T) {
 	var stdin bytes.Buffer
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{dryRun: true}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{}, opts)
+	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -654,7 +793,7 @@ func TestModelPrune_NoEmptyModels(t *testing.T) {
 	var stdin bytes.Buffer
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: true, dryRun: false}
-	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{}, opts)
+	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -676,7 +815,7 @@ func TestModelPrune_ConfirmYes(t *testing.T) {
 	stdin := bytes.NewBufferString("y\n")
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: false, dryRun: false}
-	err := runModelPrune(mock, stdin, &stdout, &stderr, []string{}, opts)
+	err := runModelPrune(mock, stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -706,7 +845,7 @@ func TestModelPrune_ConfirmNo(t *testing.T) {
 	stdin := bytes.NewBufferString("n\n")
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: false, dryRun: false}
-	err := runModelPrune(mock, stdin, &stdout, &stderr, []string{}, opts)
+	err := runModelPrune(mock, stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
 
 	// Should return ErrCancelled
 	if err != ErrCancelled {
@@ -719,6 +858,29 @@ func TestModelPrune_ConfirmNo(t *testing.T) {
 	}
 }
 
+func TestModelPrune_NonInteractiveWithoutForce(t *testing.T) {
+	mock := &mockClient{
+		modelNames: []string{"Empty1"},
+		noteIDs:    []int64{}, // no notes
+	}
+
+	var stdin bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	opts := modelPruneOptions{force: false, dryRun: false}
+	err := runModelPrune(mock, &stdin, &stdout, &stderr, []string{}, opts, neverInteractive)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("expected error mentioning --force, got: %v", err)
+	}
+	// Should NOT call RemoveEmptyNotes
+	if mock.removeEmptyNotesCalled {
+		t.Error("expected RemoveEmptyNotes to NOT be called in non-interactive mode")
+	}
+}
+
 func TestModelPrune_ConfirmEmpty(t *testing.T) {
 	mock := &mockClient{
 		modelNames: []string{"Empty1"},
@@ -728,7 +890,7 @@ func TestModelPrune_ConfirmEmpty(t *testing.T) {
 	stdin := bytes.NewBufferString("\n") // empty response = no
 	var stdout, stderr bytes.Buffer
 	opts := modelPruneOptions{force: false, dryRun: false}
-	err := runModelPrune(mock, stdin, &stdout, &stderr, []string{}, opts)
+	err := runModelPrune(mock, stdin, &stdout, &stderr, []string{}, opts, alwaysInteractive)
 
 	// Should return ErrCancelled
 	if err != ErrCancelled {
